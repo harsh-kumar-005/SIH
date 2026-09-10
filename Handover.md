@@ -15,6 +15,8 @@
 - **Architectural Milestone (ADR-003)**: Formulated and documented the **Trusted Execution Environment (TEE)** Confidential AI & Simulation subsystem across Architecture, Constraints, Execution Flow, and Decisions.
 - **Simulation Pipeline (ADR-004)**: Implemented and validated [simulate_bell.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/simulate_bell.py) using Qiskit Aer (`AerSimulator`). Successfully extracts intermediate per-gate statevectors, final statevectors with `{"real", "imag"}` serialization, and 1024-shot measurement counts. Added [requirements.txt](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/requirements.txt).
 - **FastAPI Simulation Service (ADR-005)**: Implemented [main.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/main.py) with `GET /health`, `POST /circuits/simulate`, extensible `GATE_REGISTRY` (`H`, `X`, `Y`, `Z`, `CNOT`, `S`, `T`, `RX`), strict validation with custom HTTP 400 messages, and CORS middleware. Verified with 6/6 passing tests in [test_api.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_api.py).
+- **React Client Pipeline Test (ADR-006)**: Scaffolding minimal Vite React app in [frontend/](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/frontend/). Implemented [App.jsx](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/frontend/src/App.jsx) with "Run Circuit" (valid Bell state) and "Run Invalid Circuit" (400 validation error), live CORS verified against the running FastAPI daemon. Added complete setup instructions to [README.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/README.md).
+
 
 
 

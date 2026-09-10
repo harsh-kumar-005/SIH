@@ -142,6 +142,31 @@ The frontend circuit builder requires an HTTP API to simulate arbitrary quantum 
 - **Positive:** O(1) extension for new gates; airtight HTTP 400 user-facing error reporting; verified with comprehensive test suite (`test_api.py`).
 - **Constraint:** Limited to $\le 8$ qubits per system invariants (Constraints.md §2).
 
+---
+
+## [ADR-006] Minimal React Client & End-to-End CORS Pipeline Verification
+- **Date:** 2026-09-11
+- **Model / Author:** Gemini 3.8 Flash
+- **Status:** Accepted
+
+#### Context & Motivation
+Before introducing heavy UI component libraries, canvas engines, or state stores, a lightweight frontend pipeline test is essential to prove that HTTP/JSON interchange and cross-origin communication between the Vite client (`http://localhost:5173`) and FastAPI server (`http://localhost:8000`) function reliably.
+
+#### Decision & Mechanism
+1. Initialized a minimal React client using Vite in `frontend/`.
+2. Implemented `frontend/src/App.jsx` with hardcoded `BELL_CIRCUIT` and `INVALID_CIRCUIT` payloads.
+3. Connected actions to `POST http://localhost:8000/circuits/simulate` with in-flight `"Simulating…"` status, raw JSON `<pre>` rendering on success, and red error text on 400/network failures.
+4. Validated live CORS integration between port 5173 and port 8000 for both 200 OK and 400 Bad Request responses.
+5. Documented end-to-end setup instructions in `README.md`.
+
+#### Alternatives Considered
+- *Mocking API calls in frontend:* Defeats integration verification and obscures CORS issues.
+- *Adding UI libraries upfront:* Adds unnecessary noise and complexity before basic connectivity is validated.
+
+#### Trade-offs & Consequences
+- **Positive:** Clean proof that client-to-backend communication, CORS headers, and error propagation work seamlessly end-to-end.
+
+
 
 
 
