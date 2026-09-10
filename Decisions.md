@@ -117,5 +117,31 @@ Frontend visualizers (Bloch spheres, statevector bars) and pedagogical inspector
 #### Trade-offs & Consequences
 - Clean JSON interchange payload ready for backend API response and visualizer ingestion.
 
+---
+
+## [ADR-005] Generic Quantum Circuit Simulation API & Extensible Gate Registry
+- **Date:** 2026-09-11
+- **Model / Author:** Gemini 3.8 Flash
+- **Status:** Accepted
+
+#### Context & Motivation
+The frontend circuit builder requires an HTTP API to simulate arbitrary quantum circuits with dynamic gate counts, qubit counts, and parameterizations. Adding new quantum gates must not require refactoring endpoint routes or procedural `if-elif` control flows. Robust validation must preempt unhandled Qiskit exceptions (e.g. index errors, dimension mismatches) and return informative HTTP 400 responses.
+
+#### Decision & Mechanism
+1. Built a FastAPI application in `main.py` exposing `POST /circuits/simulate` and `GET /health`.
+2. Created an extensible `GATE_REGISTRY` dictionary mapping gate names (`H`, `X`, `Y`, `Z`, `CNOT`, `S`, `T`, `RX`) to expected qubit counts, validation flags, Qiskit application lambdas, and display formatters.
+3. Implemented defensive validation enforcing bounds: $1 \le \text{qubit\_count} \le 8$, distinct target qubits for multi-qubit gates, valid index ranges, and positive shot counts.
+4. Added CORS middleware matching localhost and 127.0.0.1 on any port for seamless local frontend integration.
+5. Standardized response schema containing `qubit_count`, `gates_applied`, `per_gate_states`, `final_statevector`, and `measurement_counts`.
+
+#### Alternatives Considered
+- *Hardcoded switch-case / if-elif in endpoint:* Highly brittle; requires modifying endpoint logic for every new quantum gate.
+- *Blindly passing user parameters to Qiskit without validation:* Results in raw 500 internal server error tracebacks exposed to frontend users.
+
+#### Trade-offs & Consequences
+- **Positive:** O(1) extension for new gates; airtight HTTP 400 user-facing error reporting; verified with comprehensive test suite (`test_api.py`).
+- **Constraint:** Limited to $\le 8$ qubits per system invariants (Constraints.md §2).
+
+
 
 
