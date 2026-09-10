@@ -9,12 +9,10 @@
 ## 1. Current State & What Was Accomplished
 - Converted alias file `SIH_Quantum_Platform_Backend_Schema.md` to full local UTF-8 document.
 - Formalized and established the 15 Core AI Engineering Tenets in [AGENTS.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/AGENTS.md).
-- Initialized core living project documents:
-  - [Architecture.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Architecture.md): System topology, client/server split, simulation tiers, AI tutor design.
-  - [Constraints.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Constraints.md): Non-negotiables, qubit bounds, sandboxing, secret isolation, little-endian qubit conventions.
-  - [Decisions.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Decisions.md): Decision log with ADR-001 (Adoption of Engineering Protocol).
-  - [Flow.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Flow.md): Traced key execution paths (Circuit Sim, Pedagogical Loop, Code/Canvas sync).
-  - [Handover.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Handover.md): This living handoff document.
+- Initialized core living project documents ([Architecture.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Architecture.md), [Constraints.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Constraints.md), [Decisions.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Decisions.md), [Flow.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Flow.md), [Handover.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Handover.md)).
+- Configured git remote `origin` to `https://github.com/harsh-kumar-005/SIH.git`.
+- Added `.gitignore` and sanitized repo by untracking `.DS_Store`.
+- Committed and pushed initial platform foundation to remote `main`.
 
 ---
 

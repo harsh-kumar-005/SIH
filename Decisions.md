@@ -47,3 +47,25 @@ AI-assisted coding rapidly degrades if sessions lack persistent context, decisio
 #### Trade-offs & Consequences
 - **Positive:** Context survives across sessions; models cannot hallucinate or violate constraints blindly.
 - **Maintenance:** Requires ~30 seconds of discipline per turn to keep logs and handovers synchronized.
+
+---
+
+## [ADR-002] Remote Repository Configuration & Git Hygiene
+- **Date:** 2026-09-11
+- **Model / Author:** Gemini 3.8 Flash
+- **Status:** Accepted
+
+#### Context & Motivation
+The user designated `https://github.com/harsh-kumar-005/SIH` as the upstream remote repository to synchronize project increments continuously.
+
+#### Decision & Mechanism
+1. Configured git remote `origin` pointing to `https://github.com/harsh-kumar-005/SIH.git` with primary branch `main`.
+2. Created `.gitignore` covering macOS system metadata, env secrets, Node/Python builds, and dependencies.
+3. Untracked `.DS_Store` to prevent OS artifact pollution.
+
+#### Alternatives Considered
+- Direct push without `.gitignore`: Risky, leaks OS metadata and creates merge conflicts later.
+
+#### Trade-offs & Consequences
+- Clean remote history aligned with project security invariants (Constraints.md §1.3).
+
