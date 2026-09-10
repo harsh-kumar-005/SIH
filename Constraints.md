@@ -42,3 +42,15 @@
 - **Normalization:**
   - All statevectors must satisfy $\sum |\alpha_i|^2 = 1.0 \pm 10^{-6}$.
   - Any unitary matrix checked in challenges must verify $U^\dagger U = I$.
+
+---
+
+## 4. Confidentiality & TEE Invariants
+
+1. **Zero External Data Exfiltration for Enclave Workloads:**
+   - Under confidential mode, user circuits and conversational prompts must never be dispatched to third-party proprietary LLM APIs that log or train on inputs.
+2. **Attestation Gatekeeping:**
+   - Client applications must reject connections if the hardware attestation signature does not validate against the vendor root-of-trust (AMD/AWS/Intel) or if PCR measurements do not match the published build hash.
+3. **Non-Persistent In-Memory Execution:**
+   - The TEE runtime must guarantee zero disk persistence for user circuit context and session tokens. All allocations must be scrubbed immediately upon session teardown.
+

@@ -10,9 +10,10 @@
 - Converted alias file `SIH_Quantum_Platform_Backend_Schema.md` to full local UTF-8 document.
 - Formalized and established the 15 Core AI Engineering Tenets in [AGENTS.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/AGENTS.md).
 - Initialized core living project documents ([Architecture.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Architecture.md), [Constraints.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Constraints.md), [Decisions.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Decisions.md), [Flow.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Flow.md), [Handover.md](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/Handover.md)).
-- Configured git remote `origin` to `https://github.com/harsh-kumar-005/SIH.git`.
+- Configured git remote `origin` to `https://github.com/harsh-kumar-005/SIH.git` and synchronized `main`.
 - Added `.gitignore` and sanitized repo by untracking `.DS_Store`.
-- Committed and pushed initial platform foundation to remote `main`.
+- **Architectural Milestone (ADR-003)**: Formulated and documented the **Trusted Execution Environment (TEE)** Confidential AI & Simulation subsystem across Architecture, Constraints, Execution Flow, and Decisions.
+
 
 ---
 

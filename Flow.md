@@ -78,3 +78,39 @@
 4. Canvas Re-render
    - Updates SVG grid lines and gate nodes smoothly without losing viewport zoom/pan
 ```
+
+---
+
+## 4. Flow 4: Cryptographically Attested TEE AI Tutor Flow (Zero-Leakage Inference)
+
+```
+[User submits question about proprietary/exercise circuit]
+                         │
+                         ▼
+1. Client-Side Attestation Handshake
+   - Client requests `/api/v1/tee/attestation`
+   - Enclave generates Hardware Attestation Document with PCR hashes
+   - Client verifies enclave signature against AMD / AWS root CA cert
+                         │
+                         ▼
+2. Ephemeral Session Key Exchange (ECDH inside Enclave)
+   - TLS tunnel terminates directly inside enclave memory
+   - Host OS / cloud hypervisor cannot decrypt payload
+                         │
+                         ▼
+3. Enclave Ingestion & Context Assembly
+   - Decrypts circuit AST, student question, and execution vectors
+   - Loads into encrypted RAM space (MEK - Memory Encryption Key)
+                         │
+                         ▼
+4. Hardware-Isolated LLM Inference (vLLM / llama.cpp)
+   - Runs model entirely within enclave memory bounds
+   - Generates Socratic guidance without external API round-trips
+   - Zero-Data-Retention: Context discarded immediately after generation
+                         │
+                         ▼
+5. Encrypted Stream Delivery
+   - Streams Socratic explanation back through secure channel to Client UI
+   - No prompts or circuit logic logged to disk, database, or external servers
+```
+

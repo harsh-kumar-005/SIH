@@ -35,10 +35,28 @@
 │   ┌─────▼────┐   ┌─────▼────┐   ┌─────▼────┐   ┌─────▼────┐  ┌─────▼────┐   │
 │   │ Circuit  │   │Simulation│   │ AI Tutor │   │Progress  │  │Challenge │   │
 │   │ Service  │   │Execution │   │ Service  │   │& Profile │  │& Grading │   │
-│   │(Transpile│   │(Qiskit   │   │(Context- │   │(XP,      │  │(State &  │   │
-│   │ AST/Sync)│   │ Aer/QPU) │   │ Injected)│   │ Streaks) │  │ Unitary) │   │
+│   │(Transpile│   │(Qiskit   │   │  Router  │   │(XP,      │  │(State &  │   │
+│   │ AST/Sync)│   │ Aer/QPU) │   │          │   │ Streaks) │  │ Unitary) │   │
 │   └─────┬────┘   └─────┬────┘   └─────┬────┘   └─────┬────┘  └─────┬────┘   │
+│         │              │              │              │             │        │
 │         └──────────────┴──────────────┼──────────────┴─────────────┘        │
+│                                       │                                     │
+│                        ┌──────────────▼──────────────┐                      │
+│                        │  TRUSTED EXECUTION ENV (TEE)│                      │
+│                        │  [Hardware-Isolated Enclave]│                      │
+│                        │ ┌─────────────────────────┐ │                      │
+│                        │ │ Remote Attestation Core │ │                      │
+│                        │ │ (AMD SEV-SNP / Nitro)   │ │                      │
+│                        │ ├─────────────────────────┤ │                      │
+│                        │ │ Encrypted In-Memory LLM │ │                      │
+│                        │ │ (vLLM / llama.cpp / ZDR)│ │                      │
+│                        │ ├─────────────────────────┤ │                      │
+│                        │ │ Private Circuit Sim &   │ │                      │
+│                        │ │ Socratic Reasoning Core │ │                      │
+│                        │ └─────────────────────────┘ │                      │
+│                        │ Hardware Memory Encryption  │                      │
+│                        │ Zero Host/Cloud Access      │                      │
+│                        └──────────────┬──────────────┘                      │
 │                                       ▼                                     │
 │                        PostgreSQL Database (Prisma / SQL)                   │
 │         (Users, Circuits, Curriculum Nodes, Challenge Attempts, Logs)       │
@@ -74,3 +92,14 @@
 ### 2.4 Persistence & Data Model (PostgreSQL)
 - Built directly on the specifications in `SIH_Quantum_Platform_Backend_Schema.md`.
 - Normalized entities for User Accounts, Courses, Modules, Lessons, Challenges, Submissions, Circuits, and Session Analytics.
+
+### 2.5 Confidential Computing & TEE Subsystem (Hardware-Enforced Privacy)
+- **The Core Problem with Standard AI Cloud Deployments:**
+  - Student code, proprietary enterprise circuits, research IP, and conversational queries are transmitted to third-party endpoints.
+  - Vulnerable to provider logging, model training ingestion, cloud operator snooping, and memory dumps.
+- **TEE Hardware-Level Security:**
+  - Deploys within a secure enclave (e.g., AWS Nitro Enclave, AMD SEV-SNP, Intel SGX, or GCP Confidential VM).
+  - **Memory Encryption (MEK):** Hardware-generated AES keys encrypt volatile memory; neither the cloud provider, hypervisor root, nor rogue host processes can inspect enclave RAM.
+  - **Remote Cryptographic Attestation:** Before the client transmits circuit definitions or prompts, the enclave produces an unforgeable hardware-signed attestation document (PCR measurements). The client validates that the binary running inside the enclave is the unaltered, official, zero-data-retention build.
+  - **Zero-Data-Retention (ZDR):** Prompts, circuits, and responses exist only ephemerally in encrypted memory and are destroyed upon request completion. No external training logging is possible.
+
