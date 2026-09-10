@@ -94,4 +94,28 @@ Standard cloud LLM architectures leak user code, circuit algorithms, student que
 - **Positive:** Absolute cryptographic privacy guarantee, defense against cloud administrator snooping, zero external data leakage, powerful competitive differentiator for SIH.
 - **Complexity:** Requires attestation verification logic in the client/proxy and enclave build packaging.
 
+---
+
+## [ADR-004] Quantum State Serialization & Intermediate Step Simulation
+- **Date:** 2026-09-11
+- **Model / Author:** Gemini 3.8 Flash
+- **Status:** Accepted
+
+#### Context & Motivation
+Frontend visualizers (Bloch spheres, statevector bars) and pedagogical inspectors require step-by-step statevectors after each discrete gate slice, alongside shot-based measurement histograms. Complex numbers cannot be natively encoded in JSON standards without serialization.
+
+#### Decision & Mechanism
+1. Built `simulate_bell.py` using modern `qiskit` and `qiskit-aer` (`AerSimulator`).
+2. Captured intermediate step statevectors after $H(q_0)$ and $CNOT(q_0, q_1)$ using `save_statevector()`.
+3. Standardized amplitude serialization into `{"real": float, "imag": float}` rounded to 6 decimal places to prevent floating-point representation noise.
+4. Normalized shot counts over computational basis states (`00`, `01`, `10`, `11`) with explicit 0-count fallbacks.
+
+#### Alternatives Considered
+- *Stringifying complex numbers (e.g. "0.707+0j"):* Difficult for frontend JavaScript clients to parse reliably without custom regex.
+- *Returning only final state:* Prevents step-by-step circuit timeline inspection in UI.
+
+#### Trade-offs & Consequences
+- Clean JSON interchange payload ready for backend API response and visualizer ingestion.
+
+
 
