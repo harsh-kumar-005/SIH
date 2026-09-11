@@ -192,6 +192,33 @@ Generic LLMs produce textbook explanations detached from the user's active circu
 - **Positive:** Pedagogically sound, verifiable, resistant to hallucinations and adversarial student queries.
 - **Constraint:** Context injection must always provide sanitized, accurate simulation JSON.
 
+---
+
+## [ADR-008] Async PostgreSQL Persistence Layer, Alembic Migrations, and Append-Only Simulation Ledger
+- **Date:** 2026-09-11
+- **Model / Author:** Gemini 3.8 Flash
+- **Status:** Accepted
+
+#### Context & Motivation
+The PRD and TRD specify that learning progress, circuit iterations, and student predictions must be persisted to enable empirical comparison loops and historical analytics. In accordance with system invariants, the simulation execution ledger must be append-only (no destructive updates).
+
+#### Decision & Mechanism
+1. Built SQLAlchemy 2.0 async models in `db/models.py` for `users`, `circuits`, `simulation_runs`, and `predictions`.
+2. Established `simulation_runs` as an append-only table (INSERT only) tracking every execution, noise level, statevector, and execution duration.
+3. Created `alembic/` async migrations and generated initial migration `84a43014ac7d_initial_tables.py`, verified against PostgreSQL.
+4. Added `docker-compose.yml` for isolated containerized PostgreSQL deployment.
+5. Updated `POST /circuits/simulate` to persist `circuits` and `simulation_runs` rows and return `circuit_id` and `run_id`.
+6. Added `POST /predictions` and `GET /predictions/{id}/compare` to close the pedagogical hypothesis testing loop.
+
+#### Alternatives Considered
+- *In-memory mock store / SQLite:* Insufficient for production concurrent workloads, JSONB operations, and team collaboration.
+- *Synchronous psycopg2 driver:* Blocks FastAPI async event loop under high concurrency.
+
+#### Trade-offs & Consequences
+- **Positive:** Type-safe async DB access; robust schema migration trail; append-only auditability.
+- **Maintenance:** Requires running `alembic upgrade head` across deployment environments.
+
+
 
 
 
