@@ -190,6 +190,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [simResult]);
 
+  // ─── detailMsg — normalise FastAPI error detail to a plain string ───────────
+  // FastAPI validation errors (422) return detail as an array of Pydantic error
+  // objects: [{type, loc, msg, input, ctx}, …]. Setting that array directly in
+  // state and rendering it as {authError} crashes React with "Objects are not
+  // valid as a React child". This helper always returns a string.
+  function detailMsg(data, fallback) {
+    const d = data?.detail;
+    if (!d) return fallback;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) return d.map((e) => e.msg || JSON.stringify(e)).join(' · ');
+    return fallback;
+  }
+
   // ─── authFetch — injects Authorization header from in-memory token ──────────
   // Uses a ref so the function identity is stable across renders and can safely
   // be called inside async callbacks without a stale-closure risk.
@@ -214,7 +227,7 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setAuthError(data?.detail || 'Invalid email or password.');
+        setAuthError(detailMsg(data, 'Invalid email or password.'));
         return;
       }
       // Store token and user in memory — never write to localStorage
@@ -244,7 +257,7 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setAuthError(data?.detail || `Signup failed (${res.status})`);
+        setAuthError(detailMsg(data, `Signup failed (${res.status})`));
         return;
       }
       // After signup, switch to login with a success hint
