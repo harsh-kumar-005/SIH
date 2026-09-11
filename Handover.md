@@ -1,8 +1,8 @@
 # Session Handover & State (`Handover.md`)
 
-**Current Date & Time:** 2026-09-11 02:18 IST  
-**Active Model:** Gemini 3.8 Flash  
-**Status:** Protocol Established; Ready for implementation tasks.
+**Current Date & Time:** 2026-09-11 15:15 IST
+**Active Model:** Antigravity (Google DeepMind)
+**Status:** ADR-016 complete — Full authentication system (backend + frontend) shipped and verified.
 
 ---
 
@@ -19,36 +19,49 @@
 - **AI Tutor Prompt Architecture (ADR-007)**: Formalized empirical Socratic tutor prompt in [tutor_prompt.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/tutor_prompt.py). Implemented context injection formatting and validated two test scenarios: (1) causal Bell state grounding and (2) contradictory data guardrails where the tutor detects and flags mismatches.
 - **PostgreSQL Persistence & Predictions Layer (ADR-008)**: Configured async SQLAlchemy 2.0 and Alembic migrations for 4 core tables (`users`, `circuits`, `simulation_runs`, `predictions`) per backend schema. Added [docker-compose.yml](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/docker-compose.yml). Extended `/circuits/simulate` with automatic circuit and run persistence, added `POST /predictions` and `GET /predictions/{id}/compare`. Verified end-to-end with [test_predictions_workflow.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_predictions_workflow.py).
 - **Probability Normalization & Diagnostics (ADR-009)**: Updated `GET /predictions/{id}/compare` to normalize raw counts to 3-decimal probability distribution matching the predicted 0-1 scale. Added `POST /circuits` for unsimulated draft circuits. Rewrote [test_predictions_workflow.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_predictions_workflow.py) to prove distinct 404 handling between unsimulated circuits and non-existent predictions.
-
-
-
-
-
-
-
+- **Interactive 2-Qubit Circuit Builder (ADR-010)**: Replaced placeholder React page with interactive SVG circuit canvas in [App.jsx](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/frontend/src/App.jsx). Features sharp-cornered gate tiles (`H`, `X`, `Y`, `Z`), two-click CNOT placement (control dot → target ⊕), click-to-remove, live simulation dispatch, dynamic 4-bar measurement histogram with percentages, formatted statevector inspector (`real + imag*i`), and inline error display.
+- **Full Experiment Workspace UI — Predict→Run→Explain loop (ADR-011)**: Replaced generic styling with full design-token CSS (`index.css`) per UIUX §2 — `#EEF0F4` paper, `#0D0F14` void canvas, JetBrains Mono for data, Literata for prose, flat 1px hairlines, no glass/shadow/gradient. Rewrote `App.jsx` with two-column workspace layout (circuit+prediction+results left; AI Tutor right). Prediction panel: four bar-steppers styled identically to result bars (violet `#6E5AD6`), live sum indicator, Lock button disabled until sum=1.0±0.011. Run+compare chart: prediction bars (violet, left half) animate into measured bars (cobalt `#1B4FE0`, right half) in-place. Build verified: `npm run build` exits 0 in 124ms.
+- **AI Tutor Grounding & Token Budget Fix (ADR-012)**: Diagnosed and resolved AI Tutor mid-sentence response truncation (`maxOutputTokens: 2048` prevents Gemini 2.5/3 internal thinking tokens from truncating user explanations). Configured dynamic `.env` reading for `GEMINI_API_KEY`. Selected `gemini-3-flash-preview` for high availability and low latency. Verified end-to-end live response with exact statevector and shot references.
+- **Step-by-Step Amplitude Evolution Scrubber (ADR-013)**: Implemented scrubber component directly beneath circuit canvas. Displays `◀ Step 0 / N ▶` with ArrowLeft/ArrowRight support. Labels steps dynamically from `per_gate_states`. Synchronized with circuit canvas to highlight the active gate (`--collapse-cobalt`) and dim future gates (`opacity: 0.35`). Re-renders the statevector table dynamically per step. Automatically defaults to final step on run completion. Build verified: `npm run build` exits 0 in 221ms.
+- **Lock Prediction Button Dependency Fix**: Removed stale `!circuitId` check on `btn-lock-prediction` in `App.jsx`. `lockPrediction` creates the circuit via `POST /circuits` on demand, so `circuitId` is legitimately null before locking. Fixed condition to `disabled={!sumOk || predLoading || gates.length === 0}`.
+- **Debug Mode & Diagnostic Socratic Tutor (ADR-014)**: Added "Debug Mode" experiment type reusing the circuit builder and AI tutor panel.
+  - Backend `GET /experiments/debug/bell-state` serves broken Bell state challenge (`X(q0)` + `CNOT(q0, q1)`) with target distribution (`|00⟩: 0.5, |11⟩: 0.5`).
+  - Backend `/tutor/ask` updated with conditional Socratic debug logic: asks diagnostic questions when broken without revealing the solution; affirms and celebrates when fixed.
+  - Frontend mode toggle (`Standard` vs `🐞 Debug Mode`), amber prompt banner (`--signal-amber`), Target vs Observed comparison card, auto-fired first-run tutor hint, and unlocked iterative running.
+  - End-to-end verified with live Gemini 3 Flash tutor and Qiskit simulation.
+- **Noise Lab & Depolarizing Error Simulation (ADR-015)**: Added "Noise Lab" experiment mode with physical decoherence modeling.
+  - Backend `POST /circuits/simulate` accepts `noise_level` (0.0–1.0) with strict bounds validation. When `noise_level > 0`, constructs Qiskit Aer `NoiseModel` with `depolarizing_error` scaled by noise level applied exclusively to the measurement/sampling pass. Statevector evolution stays ideal.
+  - Backend `POST /tutor/ask` accepts `noise_level` and `ideal_counts`, grounding AI explanations in the exact noise percentage and count deltas.
+  - Frontend mode switcher 3-way toggle (`Standard` | `🐞 Debug Mode` | `🔬 Noise Lab`).
+  - Fixed read-only Bell state circuit (`H(q0)` + `CNOT(q0, q1)`), horizontal slider `Noise: 0% ———●——— 100%`, debounced dispatch on drag release.
+  - Fixed-position dual side-by-side histograms: cached **Ideal (0% Noise)** vs dynamic **Noisy (X% Noise)** with locked basis order (`|00⟩`, `|01⟩`, `|10⟩`, `|11⟩`).
+  - Auto-fires grounded AI tutor debrief on noise changes. Verified provably with [test_noise_lab.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_noise_lab.py).
+- **Real Authentication — Backend + Frontend (ADR-016)**: Replaced anonymous-user pattern with a full signed-JWT auth system.
+  - **Backend** (`main.py`): `POST /auth/signup` (bcrypt hash via passlib, 409 on duplicate), `POST /auth/login` (HS256 JWT via python-jose, 24h expiry, 401 generic — no email leak). `get_current_user` dependency extracts JWT from `Authorization: Bearer` header; `require_instructor` RBAC dependency. `POST /circuits`, `POST /predictions`, `POST /tutor/ask` derive ownership from JWT — client never sends `owner_id`/`user_id`. Verified with [test_auth.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_auth.py).
+  - **Frontend** (`App.jsx`): In-memory-only JWT (`authToken` React state + `authTokenRef` ref — never localStorage). `authFetch()` wrapper injects `Authorization: Bearer` on every API call. Full-page auth screen (login/signup) shown when no token held; disappears on successful login. Signup auto-redirects to login with success banner. Header shows user badge (name + role pill) and a Log Out button that wipes all in-memory auth state. All existing fetch calls (`simulate`, `circuits`, `predictions`, `compare`, `tutor`, `debugBellState`) migrated to `authFetch()`.
+  - **CSS** (`index.css`): Dark glassmorphism auth card (void background `#0D0F14`, subtle cobalt radial glow, frosted-glass card), animated entrance, tab switcher, error/success banners, header user badge with role pill and logout button.
 
 ---
 
 ## 2. In-Flight Work & Active Context
-- The repository contains the foundational design documents:
-  - PRD (`SIH_Quantum_Platform_PRD.md`)
-  - TRD (`SIH_Quantum_Platform_TRD.md`)
-  - UI/UX Spec (`SIH_Quantum_Platform_UIUX.md`)
-  - Backend Schema (`SIH_Quantum_Platform_Backend_Schema.md`)
-- Ready to initialize project scaffolding (e.g. Next.js web application, FastAPI backend, or simulation engine components) or implement specific modules per the user's priority.
+- All three experiment modes (Standard, Debug Mode, Noise Lab) verified end-to-end.
+- Authentication fully operational: backend JWT flow verified via `test_auth.py`; frontend auth screen gated by `authToken` React state.
+- Backend (`main.py`) running on `http://localhost:8000` (task-358).
+- Frontend (`App.jsx` + `index.css`) running on `http://localhost:5174` (task-694).
+- Automated tests passing: `test_api.py` (6/6), `test_noise_lab.py` (4/4), `test_auth.py` (RBAC + ownership verified).
 
 ---
 
 ## 3. Known Blockers / Open Questions
-- Awaiting user direction on which layer to tackle first:
-  1. Frontend Client setup (Next.js / React / Canvas UI / Visualizers)
-  2. Backend Service setup (FastAPI / Database schema migrations / Qiskit Aer runner)
-  3. Client-side Quantum Simulation Engine (Wasm / JS micro-simulator)
-  4. Specific feature/component implementation from the PRD/TRD
+- Browser subagent CDP quota exhausted — auth UI verified via Python test scripts and server logs (`POST /auth/login → 200 OK`).
+- Lesson panel (collapsible thin rail per §4 wireframe) not yet implemented.
+- Prediction stepper UX uses ±5% buttons; drag-to-set bars are a future enhancement.
+- `passlib.exc.UnknownHashError` appears in older test fixtures only — live signup/login unaffected (bcrypt 3.2.2 pinned for passlib compatibility).
 
 ---
 
-## 4. Immediate Next Steps for Next Turn
-1. Review user's target milestone or feature request.
-2. Formulate small, atomic, traceable change ("one change per request").
-3. Update `Decisions.md` and `Flow.md` for any new architectural additions.
+## 4. Immediate Next Steps
+1. Lesson sidebar / collapsible pedagogy rail per §4 wireframe.
+2. Additional curriculum challenges: Phase Flip, Superdense Coding, Inverted CNOT.
+3. Instructor dashboard (protected by `require_instructor`) showing aggregated student prediction accuracy.
+4. Drag-to-set prediction sliders.
