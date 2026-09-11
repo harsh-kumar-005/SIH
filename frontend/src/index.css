@@ -1554,4 +1554,534 @@ body {
   color: #FFFFFF;
 }
 
+/* ============================================================
+   Instructor Dashboard & Access Denied (§UI/UX paper/ink tokens)
+   ============================================================ */
+
+.mode-toggle-btn.instructor {
+  border-color: rgba(27, 79, 224, 0.3);
+  color: var(--collapse-cobalt);
+}
+.mode-toggle-btn.instructor.active {
+  background: var(--collapse-cobalt);
+  color: #FFFFFF;
+  border-color: var(--collapse-cobalt);
+}
+
+/* Access Denied */
+.access-denied-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 32px;
+  background: #FFFFFF;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  max-width: 520px;
+  margin: 40px auto;
+}
+
+.access-denied-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+  opacity: 0.8;
+}
+
+.access-denied-title {
+  font-family: var(--font-data);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--error-line);
+  margin-bottom: 8px;
+}
+
+.access-denied-subtitle {
+  font-family: var(--font-prose);
+  font-size: 14px;
+  color: var(--ink-secondary);
+  line-height: 1.5;
+  max-width: 380px;
+}
+
+/* Instructor Panel Layout */
+.instructor-panel {
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.instructor-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.instructor-title {
+  font-family: var(--font-prose);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.instructor-subtitle {
+  font-family: var(--font-prose);
+  font-size: 14px;
+  color: var(--ink-secondary);
+  max-width: 620px;
+  line-height: 1.5;
+}
+
+.instructor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.instructor-summary-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 8px 14px;
+  background: #FFFFFF;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+}
+
+.instructor-summary-pill .summary-val {
+  font-family: var(--font-data);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--collapse-cobalt);
+  line-height: 1.2;
+}
+
+.instructor-summary-pill .summary-label {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+.instructor-refresh-btn {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 14px;
+  background: #FFFFFF;
+  color: var(--ink-secondary);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.instructor-refresh-btn:hover:not(:disabled) {
+  background: var(--paper);
+  color: var(--ink);
+  border-color: var(--ink-secondary);
+}
+
+.instructor-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.instructor-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(27, 79, 224, 0.08);
+  border: 1px solid rgba(27, 79, 224, 0.25);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: var(--collapse-cobalt);
+}
+
+.toast-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  color: var(--collapse-cobalt);
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.instructor-loading {
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: var(--ink-muted);
+  padding: 20px 0;
+}
+
+/* Metric Cards */
+.instructor-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.metric-card {
+  background: #FFFFFF;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.metric-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.metric-tag {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 100px;
+}
+
+.metric-tag.warning {
+  background: rgba(224, 152, 43, 0.12);
+  color: #B57410;
+  border: 1px solid rgba(224, 152, 43, 0.3);
+}
+
+.metric-tag.alert {
+  background: rgba(194, 59, 59, 0.1);
+  color: var(--error-line);
+  border: 1px solid rgba(194, 59, 59, 0.3);
+}
+
+.metric-sub {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.metric-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metric-primary-val {
+  font-family: var(--font-data);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: capitalize;
+}
+
+.metric-primary-label {
+  font-family: var(--font-prose);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.metric-code-pill {
+  margin-top: 4px;
+}
+
+.metric-code-pill code {
+  font-family: var(--font-data);
+  font-size: 11px;
+  background: var(--paper);
+  color: var(--ink-secondary);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.metric-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.metric-detail-label {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--ink-secondary);
+  white-space: nowrap;
+}
+
+.metric-progress-track {
+  flex-grow: 1;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.metric-progress-fill.warning {
+  height: 100%;
+  border-radius: 3px;
+  background: #E0982B;
+}
+
+.metric-detail-pct {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 34px;
+  text-align: right;
+}
+
+.metric-card-footer {
+  font-family: var(--font-prose);
+  font-size: 12px;
+  color: var(--ink-muted);
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
+  padding-top: 8px;
+}
+
+/* Section: Flagged Students */
+.instructor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.section-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.section-heading {
+  font-family: var(--font-data);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.section-subtext {
+  font-family: var(--font-prose);
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+.flagged-count-badge {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--error-line);
+  background: rgba(194, 59, 59, 0.1);
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid rgba(194, 59, 59, 0.25);
+  white-space: nowrap;
+}
+
+/* Empty State */
+.instructor-empty-state {
+  background: #FFFFFF;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--radius-sm);
+  padding: 36px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.instructor-empty-state .empty-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(16, 130, 80, 0.1);
+  color: #108250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.instructor-empty-state .empty-title {
+  font-family: var(--font-data);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.instructor-empty-state .empty-desc {
+  font-family: var(--font-prose);
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+/* Table Wrapper */
+.table-wrapper {
+  background: #FFFFFF;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.instructor-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.instructor-table th {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  background: var(--paper);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.instructor-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.instructor-table tr:last-child td {
+  border-bottom: none;
+}
+
+.instructor-table tr:hover td {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+.student-ident {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.student-name {
+  font-family: var(--font-prose);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.student-email {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--ink-secondary);
+}
+
+.concept-pill {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  background: var(--paper);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  text-transform: capitalize;
+}
+
+.data-num {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.mastery-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 110px;
+}
+
+.mastery-mini-track {
+  flex-grow: 1;
+  height: 5px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.mastery-mini-fill {
+  height: 100%;
+  background: #C23B3B;
+  border-radius: 3px;
+}
+
+.mastery-mini-pct {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  color: #C23B3B;
+  min-width: 28px;
+  text-align: right;
+}
+
+.misconception-pill {
+  font-family: var(--font-prose);
+  font-size: 12px;
+  display: inline-block;
+  max-width: 280px;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.misconception-pill.flagged {
+  color: #8C2525;
+  background: rgba(194, 59, 59, 0.08);
+  border: 1px solid rgba(194, 59, 59, 0.2);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.misconception-pill.none {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+.btn-message-student {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  background: #FFFFFF;
+  color: var(--collapse-cobalt);
+  border: 1px solid rgba(27, 79, 224, 0.35);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.btn-message-student:hover {
+  background: var(--collapse-cobalt);
+  color: #FFFFFF;
+  border-color: var(--collapse-cobalt);
+}
+
 

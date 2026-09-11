@@ -33,8 +33,9 @@ const API = {
   progressEvent:  `${BASE}/progress/event`,
   tutor:          `${BASE}/tutor/ask`,
   debugBellState: `${BASE}/experiments/debug/bell-state`,
-  signup:         `${BASE}/auth/signup`,
-  login:          `${BASE}/auth/login`,
+  signup:              `${BASE}/auth/signup`,
+  login:               `${BASE}/auth/login`,
+  instructorDashboard: `${BASE}/instructor/dashboard`,
 };
 
 // ─── Circuit Constants ────────────────────────────────────────────────────────
@@ -132,6 +133,12 @@ export default function App() {
   const [progressData,       setProgressData]       = useState(null);
   const [progressLoading,    setProgressLoading]    = useState(false);
   const [progressError,      setProgressError]      = useState(null);
+
+  // ── Instructor Dashboard ───────────────────────────────────────────────────
+  const [instructorData,     setInstructorData]     = useState(null);
+  const [instructorLoading,  setInstructorLoading]  = useState(false);
+  const [instructorError,    setInstructorError]    = useState(null);
+  const [messageToast,       setMessageToast]       = useState(null);
 
   // ── Tutor ─────────────────────────────────────────────────────────────────
   const [tutorMessages,      setTutorMessages]      = useState([
@@ -315,15 +322,44 @@ export default function App() {
     }
   }, [authFetch]);
 
+  // ─── Fetch Instructor Dashboard ──────────────────────────────────────────
+  const fetchInstructorDashboard = useCallback(async () => {
+    if (!authTokenRef.current) return;
+    setInstructorLoading(true);
+    setInstructorError(null);
+    try {
+      const res = await authFetch(API.instructorDashboard);
+      if (res.ok) {
+        const data = await res.json();
+        setInstructorData(data);
+      } else if (res.status === 403) {
+        setInstructorError('Access Denied: Instructor role required to view cohort dashboard.');
+      } else {
+        setInstructorError(`Failed to load instructor dashboard (${res.status})`);
+      }
+    } catch {
+      setInstructorError('Network error — could not load instructor dashboard');
+    } finally {
+      setInstructorLoading(false);
+    }
+  }, [authFetch]);
+
   useEffect(() => {
     if (authToken) {
       fetchProgress();
+      if (authUser?.role === 'instructor') {
+        fetchInstructorDashboard();
+      }
     }
-  }, [authToken, fetchProgress]);
+  }, [authToken, authUser?.role, fetchProgress, fetchInstructorDashboard]);
 
   // ─── Derived: tutor context line ─────────────────────────────────────────
   // Shows current sequencing state so the tutor panel is never misleading
-  const tutorContextLine = runId
+  const tutorContextLine = experimentMode === 'instructor'
+    ? 'Cohort Analytics & Intervention View'
+    : experimentMode === 'progress'
+    ? 'Concept Mastery Progression'
+    : runId
     ? `Circuit ${circuitId?.slice(0, 8)}… · run completed`
     : predLocked
     ? `Circuit ${circuitId?.slice(0, 8)}… · prediction locked, not yet run`
@@ -1021,6 +1057,16 @@ export default function App() {
             >
               📊 Progress
             </button>
+            {authUser?.role === 'instructor' && (
+              <button
+                type="button"
+                id="btn-instructor-mode"
+                className={`mode-toggle-btn instructor${experimentMode === 'instructor' ? ' active' : ''}`}
+                onClick={() => { setExperimentMode('instructor'); fetchInstructorDashboard(); }}
+              >
+                🎓 Instructor
+              </button>
+            )}
           </div>
         </div>
         <div className="header-right-group">
@@ -1028,7 +1074,9 @@ export default function App() {
             <span
               className={`status-dot ${predLocked ? 'locked' : ''} ${runId ? 'run' : ''}`}
             />
-            {experimentMode === 'progress'
+            {experimentMode === 'instructor'
+              ? 'Cohort Analytics · Instructor View'
+              : experimentMode === 'progress'
               ? 'Concept Mastery Tracker'
               : experimentMode === 'noise'
               ? `Noise Lab · ${Math.round(noiseLevel * 100)}% Noise`
@@ -1062,7 +1110,207 @@ export default function App() {
       {/* ══ LEFT COLUMN — circuit + prediction + results ═══════════════════════ */}
       <main className="workspace-main">
 
-        {experimentMode === 'progress' ? (
+        {experimentMode === 'instructor' ? (
+          authUser?.role !== 'instructor' ? (
+            <div className="access-denied-panel" role="region" aria-label="Access Denied">
+              <div className="access-denied-icon">🔒</div>
+              <h2 className="access-denied-title">Access Denied</h2>
+              <p className="access-denied-subtitle">
+                This dashboard is restricted to instructor accounts. Your current profile has the student role.
+              </p>
+              <button
+                type="button"
+                className="mode-toggle-btn active"
+                style={{ marginTop: 16 }}
+                onClick={exitSpecialModes}
+              >
+                Return to Workspace
+              </button>
+            </div>
+          ) : (
+            <div className="instructor-panel" role="region" aria-label="Instructor Dashboard">
+              <div className="instructor-panel-header">
+                <div>
+                  <div className="section-label">cohort analytics · instructional intervention</div>
+                  <h2 className="instructor-title">Instructor Dashboard</h2>
+                  <p className="instructor-subtitle">
+                    Real-time cohort misconceptions, mastery deficits, and student intervention tracking.
+                  </p>
+                </div>
+                <div className="instructor-header-actions">
+                  <div className="instructor-summary-pill">
+                    <span className="summary-val">{instructorData?.total_students ?? 0}</span>
+                    <span className="summary-label">Enrolled Students</span>
+                  </div>
+                  <button
+                    type="button"
+                    id="btn-refresh-instructor"
+                    className="instructor-refresh-btn"
+                    onClick={fetchInstructorDashboard}
+                    disabled={instructorLoading}
+                  >
+                    {instructorLoading ? 'Refreshing…' : '↻ Refresh'}
+                  </button>
+                </div>
+              </div>
+
+              {instructorError && (
+                <div className="inline-error" role="alert">{instructorError}</div>
+              )}
+
+              {messageToast && (
+                <div className="instructor-toast" role="status">
+                  <span>✉️ Direct message draft prepared for <strong>{messageToast.name}</strong> ({messageToast.email})</span>
+                  <button type="button" className="toast-close-btn" onClick={() => setMessageToast(null)}>✕</button>
+                </div>
+              )}
+
+              {instructorLoading && !instructorData && (
+                <div className="instructor-loading">Loading cohort analytics…</div>
+              )}
+
+              {/* ── Cohort Aggregate Cards ── */}
+              <div className="instructor-metrics-grid">
+                {/* Most-Missed Concept Card */}
+                <div className="metric-card">
+                  <div className="metric-card-header">
+                    <span className="metric-tag warning">Most-Missed Concept</span>
+                    <span className="metric-sub">
+                      {instructorData?.most_missed_concept?.total_attempts ?? 0} attempts cohort-wide
+                    </span>
+                  </div>
+                  <div className="metric-card-body">
+                    <div className="metric-primary-val">
+                      {instructorData?.most_missed_concept?.concept_name || 'None'}
+                    </div>
+                    <div className="metric-detail-row">
+                      <span className="metric-detail-label">Avg Cohort Mastery:</span>
+                      <div className="metric-progress-track" aria-hidden="true">
+                        <div
+                          className="metric-progress-fill warning"
+                          style={{
+                            width: `${Math.max(Math.round((instructorData?.most_missed_concept?.avg_mastery ?? 0) * 100), 4)}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="metric-detail-pct">
+                        {Math.round((instructorData?.most_missed_concept?.avg_mastery ?? 0) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                  <div className="metric-card-footer">
+                    Identified from lowest average mastery score across students.
+                  </div>
+                </div>
+
+                {/* Most Common Misconception Card */}
+                <div className="metric-card">
+                  <div className="metric-card-header">
+                    <span className="metric-tag alert">Most Common Misconception</span>
+                    <span className="metric-sub">
+                      {instructorData?.most_common_misconception?.event_count ?? 0} flagged occurrences
+                    </span>
+                  </div>
+                  <div className="metric-card-body">
+                    <div className="metric-primary-label">
+                      {instructorData?.most_common_misconception?.display_label || 'No misconceptions recorded'}
+                    </div>
+                    {instructorData?.most_common_misconception?.tag_name && (
+                      <div className="metric-code-pill">
+                        <code>{instructorData.most_common_misconception.tag_name}</code>
+                      </div>
+                    )}
+                  </div>
+                  <div className="metric-card-footer">
+                    AI-classified from student prediction divergences and comparison tests.
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Flagged Students Needing Intervention Table ── */}
+              <div className="instructor-section">
+                <div className="section-title-row">
+                  <div>
+                    <h3 className="section-heading">Students Flagged for Intervention</h3>
+                    <p className="section-subtext">
+                      Students flagged with 3+ attempts and concept mastery &lt; 30%, indicating targeted guidance is needed.
+                    </p>
+                  </div>
+                  <span className="flagged-count-badge">
+                    {instructorData?.students_needing_intervention?.length ?? 0} flagged
+                  </span>
+                </div>
+
+                {(!instructorData?.students_needing_intervention || instructorData.students_needing_intervention.length === 0) ? (
+                  <div className="instructor-empty-state">
+                    <div className="empty-icon">✓</div>
+                    <div className="empty-title">All students on track</div>
+                    <div className="empty-desc">No students currently meet the intervention threshold (attempts ≥ 3 &amp; mastery &lt; 30%).</div>
+                  </div>
+                ) : (
+                  <div className="table-wrapper">
+                    <table className="instructor-table">
+                      <thead>
+                        <tr>
+                          <th>Student</th>
+                          <th>Concept</th>
+                          <th>Attempts</th>
+                          <th>Mastery</th>
+                          <th>Most Recent Misconception</th>
+                          <th style={{ textAlign: 'right' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {instructorData.students_needing_intervention.map((st) => {
+                          const pct = Math.round(st.mastery_score * 100);
+                          const hasMisconception = st.most_recent_misconception && st.most_recent_misconception !== 'None recorded';
+                          return (
+                            <tr key={`${st.student_id}-${st.concept_name}`}>
+                              <td className="student-ident">
+                                <div className="student-name">{st.name}</div>
+                                <div className="student-email">{st.email}</div>
+                              </td>
+                              <td>
+                                <span className="concept-pill">{st.concept_name}</span>
+                              </td>
+                              <td className="data-num">{st.attempts}</td>
+                              <td>
+                                <div className="mastery-cell">
+                                  <div className="mastery-mini-track" aria-hidden="true">
+                                    <div
+                                      className="mastery-mini-fill"
+                                      style={{ width: `${Math.max(pct, 5)}%` }}
+                                    />
+                                  </div>
+                                  <span className="mastery-mini-pct">{pct}%</span>
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`misconception-pill ${hasMisconception ? 'flagged' : 'none'}`}>
+                                  {st.most_recent_misconception || 'None recorded'}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <button
+                                  type="button"
+                                  className="btn-message-student"
+                                  onClick={() => setMessageToast({ name: st.name, email: st.email })}
+                                  title={`Message ${st.name}`}
+                                >
+                                  Message
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        ) : experimentMode === 'progress' ? (
           <div className="progress-panel" role="region" aria-label="Concept Mastery Progress">
             <div className="progress-panel-header">
               <div>

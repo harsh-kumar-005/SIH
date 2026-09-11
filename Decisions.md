@@ -533,12 +533,57 @@ Following authentication and ownership derivation, student learning progress nee
 - `test_progress.py` verified all 5 lifecycle stages:
   1. Fresh user: all 4 concepts returned at `0.0` score, `0` attempts, `"Not Started"`.
   2. Prediction + compare on Bell state: `entanglement` updated to `0.1` score, `1` attempt, `"In Progress"`.
-  3. Debug Mode solve event: `entanglement` ticked up to `0.2` score, `2` attempts.
+   - Debug Mode solve event: `entanglement` ticked up to `0.2` score, `2` attempts.
   4. Intentionally incorrect prediction: attempts incremented to `3`, but score was preserved at `0.2` (did not regress).
   5. Final `GET /progress/me` output confirmed structured JSON payload.
 - Frontend build: `npm run build` completed in 144ms with 0 errors.
 
+---
 
+## [ADR-018] Instructor Dashboard & AI-Driven Misconception Tagging
+- **Date:** 2026-09-11
+- **Model / Author:** Antigravity (Google DeepMind)
+- **Status:** Accepted
 
+#### Context & Motivation
+Instructors require visibility into student learning patterns to intervene when students struggle with fundamental quantum concepts. While aggregate mastery scores indicate *whether* a student is struggling, they do not explain *why*. Building on the existing authentication, prediction comparison, and progress tracking infrastructure, we need a diagnostic mechanism that classifies misconceptions and presents cohort-level analytics to educators.
 
+#### Decision & Mechanism
+1. **Database Schema & Fixed Taxonomy**:
+   - `misconception_tags`: `id` (UUID PK), `name` (unique text identifier), `display_label` (human-readable title), `concept_id` (FK to `concepts.id` on delete CASCADE).
+   - `misconception_events`: `id` (UUID PK), `user_id` (FK to `users.id` on delete CASCADE), `experiment_id` (nullable UUID), `tag_id` (FK to `misconception_tags.id` on delete CASCADE), `source` (`CHECK source IN ('rule_based', 'ai_classified')`), and `created_at` (timestamptz).
+   - Alembic revision `057653aef2fa` seeds the initial entanglement taxonomy:
+     - `confuses_superposition_with_classical_probability`: *"Confuses superposition with classical probability"*
+     - `expects_correlation_without_entangling_gate`: *"Expects correlation without entangling gate"*
+     - `misreads_zero_amplitude_as_impossible_outcome`: *"Misreads zero amplitude as impossible outcome"*
+2. **AI Misconception Classifier**:
+   - Integrated into `GET /predictions/{id}/compare`: When a prediction fails the fidelity tolerance, `classify_misconception(db, user_id, pred_dist, actual_dist, concept_name)` is invoked.
+   - Constrains Gemini LLM to the curated tag identifiers for the target concept.
+   - Non-blocking design: wrapped in `try/except` with a fail-safe fallback (if LLM is unavailable or times out, returns `None` without hindering student flow).
+3. **Cohort Aggregation Endpoint (`GET /instructor/dashboard`)**:
+   - Gated strictly by `require_instructor` (JWT role must equal `"instructor"`).
+   - Calculates:
+     - `total_students`: count of registered accounts with role `"student"`.
+     - `most_missed_concept`: concept with the lowest average mastery score across students who attempted it, including total attempts.
+     - `most_common_misconception`: tag with highest event count in `misconception_events`.
+     - `students_needing_intervention`: list of students with `attempts >= 3` and `mastery_score < 0.3`, populated with their name, email, target concept, attempts, mastery score, and their most recent misconception tag.
+4. **Role-Gated Frontend Dashboard**:
+   - Header navigation button `🎓 Instructor` is conditionally rendered only when `authUser?.role === 'instructor'`.
+   - Direct navigation to instructor mode by unauthorized users renders a clean `Access Denied` card with a return button.
+   - Full paper/ink layout displaying:
+     - Summary metrics (Enrolled students pill + Refresh button).
+     - Two aggregate cards: *Most-Missed Concept* (with progress bar) and *Most Common Misconception* (with tag and occurrence count).
+     - Flagged students table with student identity, concept badge, attempts, visual mastery bar, misconception pill, and an interactive "Message" button triggering a simulated communication alert.
 
+#### Verification
+- **Per-Prediction Semantic Discrimination & Automated Verification (`test_instructor_dashboard.py`)**:
+  - Registered struggling student, simulated Bell state circuit, and submitted the exact 3-prediction sequence with varied quantum error modes:
+    1. **Prediction 1** (`{01: 0.5, 10: 0.5}` - anti-correlated / inverted phase): Correctly classified as `None` (null), confirming the classifier rejects non-matching errors without force-fitting into the taxonomy.
+    2. **Prediction 2** (`{00: 1.0}` - deterministic classical outcome): Accurately classified as `confuses_superposition_with_classical_probability`.
+    3. **Prediction 3** (`{00: 0.25, 01: 0.25, 10: 0.25, 11: 0.25}` - uniform product state across all 4): Accurately classified as `expects_correlation_without_entangling_gate`.
+  - Confirmed `compare_prediction` returns `misconception_tag` in `CompareResponse` for direct inspectability.
+  - Confirmed student token hitting `GET /instructor/dashboard` is strictly rejected with `HTTP 403 Forbidden`.
+  - Registered instructor account and accessed `GET /instructor/dashboard`, receiving `HTTP 200 OK`.
+  - Verified cohort aggregates: `total_students`, `most_missed_concept` is `entanglement`, and `students_needing_intervention` flags the student with their most recent misconception tag (`"Expects correlation without entangling gate"`).
+- **Frontend Verification**:
+  - `npm --prefix frontend run build` completed with code 0 in 341ms without errors or warnings.

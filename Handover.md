@@ -1,8 +1,8 @@
 # Session Handover & State (`Handover.md`)
 
-**Current Date & Time:** 2026-09-11 16:15 IST
+**Current Date & Time:** 2026-09-11 17:50 IST
 **Active Model:** Antigravity (Google DeepMind)
-**Status:** ADR-017 complete — Concept-level progress tracking and materialized mastery ledger implemented and fully verified across 5 lifecycle stages.
+**Status:** ADR-018 complete — Instructor Dashboard & AI-Driven Misconception Tagging fully implemented and verified end-to-end with per-prediction semantic discrimination. All WOW-tier feature milestones complete.
 
 ---
 
@@ -45,16 +45,21 @@
   - **Endpoints**: `GET /predictions/{id}/compare` auto-updates entanglement mastery; `POST /progress/event` records explicit debug solve and noise events; `GET /progress/me` returns all concepts with their mastery statuses.
   - **Frontend Integration**: Added `📊 Progress` mode to header mode-toggle group. Shows concept cards with animated mastery bars (0-100%), attempts badge, status tag (`Not Started`, `In Progress`, `Mastered`), and auto-refetches after runs, comparisons, and debug challenge solves.
   - **Automated Verification**: [test_progress.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_progress.py) passed all 5 stages provably.
+- **Instructor Dashboard & Misconception Tagging (ADR-018)**:
+  - **Database Schema**: Created `misconception_tags` and `misconception_events` tables via Alembic revision `057653aef2fa`. Seeded entanglement taxonomy (`confuses_superposition_with_classical_probability`, `expects_correlation_without_entangling_gate`, `misreads_zero_amplitude_as_impossible_outcome`).
+  - **AI Misconception Classifier**: Integrated `classify_misconception` into `compare_prediction`. Diagnoses student prediction divergences against actual counts and categorizes into the curated taxonomy.
+  - **Backend Endpoint**: Implemented `GET /instructor/dashboard` with strict `require_instructor` authorization. Computes cohort-wide metrics: `total_students`, `most_missed_concept`, `most_common_misconception`, and `students_needing_intervention` (attempts $\ge 3$ & mastery $< 30\%$) with their most recent misconception tag.
+  - **Role-Gated Frontend UI**: Integrated `🎓 Instructor` mode in [App.jsx](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/frontend/src/App.jsx). Shows aggregate cards, flagged students table with interactive "Message" triggers, and clean access-denied state for non-instructors. Styled via paper/ink design tokens in [index.css](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/frontend/src/index.css).
+  - **Automated Verification**: [test_instructor_dashboard.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_instructor_dashboard.py) passed end-to-end with per-prediction semantic breakdown verified (Prediction 1: `None`/null; Prediction 2: `confuses_superposition_with_classical_probability`; Prediction 3: `expects_correlation_without_entangling_gate`). Frontend bundle builds cleanly in 341ms.
 
 ---
 
 ## 2. In-Flight Work & Active Context
-- All four experiment & learning views (Standard, Debug Mode, Noise Lab, Concept Progress) are operational.
-- Authentication fully operational: backend JWT flow verified via `test_auth.py`.
-- Progress tracking verified via `test_progress.py`.
+- All 5 experiment & learning views (Standard, Debug Mode, Noise Lab, Concept Progress, Instructor Dashboard) are fully operational.
+- Authentication fully operational: signed JWT auth with role-based access control (`student` vs `instructor`).
 - Backend running on `http://localhost:8000` (task-358).
 - Frontend running on `http://localhost:5173` (task-225/task-694).
-- Automated tests passing: `test_auth.py` (all 8 checks passed), `test_progress.py` (all 5 stages passed).
+- Automated test suites passing: `test_auth.py`, `test_progress.py`, `test_instructor_dashboard.py`.
 
 ---
 
@@ -62,11 +67,9 @@
 - Lesson panel (collapsible thin rail per §4 wireframe) not yet implemented.
 - Superposition & Gate modules exist as placeholder DB concepts awaiting dedicated curriculum circuits.
 
-
 ---
 
 ## 4. Immediate Next Steps
 1. Lesson sidebar / collapsible pedagogy rail per §4 wireframe.
 2. Additional curriculum challenges: Phase Flip, Superdense Coding, Inverted CNOT.
-3. Instructor dashboard (protected by `require_instructor`) showing aggregated student prediction accuracy.
-4. Drag-to-set prediction sliders.
+3. Drag-to-set prediction sliders.

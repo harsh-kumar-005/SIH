@@ -45,6 +45,7 @@ class User(Base):
     circuits = relationship("Circuit", back_populates="owner")
     predictions = relationship("Prediction", back_populates="user")
     concept_masteries = relationship("ConceptMastery", back_populates="user", cascade="all, delete-orphan")
+    misconception_events = relationship("MisconceptionEvent", back_populates="user", cascade="all, delete-orphan")
 
 
 class Circuit(Base):
@@ -125,6 +126,7 @@ class Concept(Base):
 
     # Relationships
     masteries = relationship("ConceptMastery", back_populates="concept", cascade="all, delete-orphan")
+    misconception_tags = relationship("MisconceptionTag", back_populates="concept", cascade="all, delete-orphan")
 
 
 class ConceptMastery(Base):
@@ -149,4 +151,46 @@ class ConceptMastery(Base):
     # Relationships
     user = relationship("User", back_populates="concept_masteries")
     concept = relationship("Concept", back_populates="masteries")
+
+
+class MisconceptionTag(Base):
+    """
+    misconception_tags table:
+    Fixed taxonomy of curated misconception classifications tied to concepts.
+    """
+    __tablename__ = "misconception_tags"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Text, unique=True, nullable=False, index=True)
+    display_label = Column(Text, nullable=False)
+    concept_id = Column(UUID(as_uuid=True), ForeignKey("concepts.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Relationships
+    concept = relationship("Concept", back_populates="misconception_tags")
+    events = relationship("MisconceptionEvent", back_populates="tag", cascade="all, delete-orphan")
+
+
+class MisconceptionEvent(Base):
+    """
+    misconception_events table:
+    Logged student misconception occurrences detected rule-based or via AI classifier.
+    """
+    __tablename__ = "misconception_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    experiment_id = Column(UUID(as_uuid=True), nullable=True)
+    tag_id = Column(UUID(as_uuid=True), ForeignKey("misconception_tags.id", ondelete="CASCADE"), nullable=False, index=True)
+    source = Column(
+        Text,
+        CheckConstraint("source IN ('rule_based', 'ai_classified')", name="check_misconception_source"),
+        nullable=False,
+        default="ai_classified"
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    # Relationships
+    user = relationship("User", back_populates="misconception_events")
+    tag = relationship("MisconceptionTag", back_populates="events")
+
 

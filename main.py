@@ -33,7 +33,10 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 
 from db.database import get_db
-from db.models import User, Circuit, SimulationRun, Prediction, Concept, ConceptMastery
+from db.models import (
+    User, Circuit, SimulationRun, Prediction, Concept, ConceptMastery,
+    MisconceptionTag, MisconceptionEvent
+)
 from tutor_prompt import SYSTEM_PROMPT, format_tutor_user_message
 
 # -----------------------------------------------------------------------------
@@ -175,6 +178,7 @@ class CompareResponse(BaseModel):
     actual: Dict[str, float]
     circuit_id: uuid.UUID
     run_id: uuid.UUID
+    misconception_tag: Optional[str] = None
 
 
 class CircuitCreateRequest(BaseModel):
@@ -225,6 +229,39 @@ class ProgressEventRequest(BaseModel):
     concept: str = Field("entanglement", description="Name of concept, e.g. 'entanglement'")
     event_type: str = Field(..., description="Event type, e.g. 'debug_solved', 'noise_lab_completed'")
     success: bool = Field(True, description="Whether event was successful")
+
+
+class MostMissedConcept(BaseModel):
+    concept_name: str
+    avg_mastery: float
+    total_attempts: int
+
+
+class MostCommonMisconception(BaseModel):
+    tag_name: str
+    display_label: str
+    event_count: int
+
+
+class StudentInterventionItem(BaseModel):
+    student_id: uuid.UUID
+    name: str
+    email: str
+    concept_name: str
+    attempts: int
+    mastery_score: float
+    most_recent_misconception: Optional[str] = "None recorded"
+
+
+class InstructorDashboardResponse(BaseModel):
+    status: str = "ok"
+    message: str
+    instructor_id: uuid.UUID
+    most_missed_concept: Optional[MostMissedConcept] = None
+    most_common_misconception: Optional[MostCommonMisconception] = None
+    students_needing_intervention: List[StudentInterventionItem] = Field(default_factory=list)
+    total_students: int = 0
+
 
 
 
@@ -432,16 +469,115 @@ async def auth_login(req: LoginRequest, db: AsyncSession = Depends(get_db)) -> T
 
 @app.get(
     "/instructor/dashboard",
+    response_model=InstructorDashboardResponse,
     status_code=status.HTTP_200_OK,
     tags=["Instructor"]
 )
-async def instructor_dashboard(instructor: User = Depends(require_instructor)) -> Dict[str, Any]:
-    """Test route verifying require_instructor dependency."""
-    return {
-        "status": "ok",
-        "message": f"Welcome instructor {instructor.display_name}",
-        "instructor_id": instructor.id,
-    }
+async def instructor_dashboard(
+    instructor: User = Depends(require_instructor),
+    db: AsyncSession = Depends(get_db),
+) -> InstructorDashboardResponse:
+    """
+    Cohort-wide analytics for instructors:
+    - Most-missed concept (lowest average mastery across students)
+    - Most common misconception (highest-frequency tag in misconception_events)
+    - Students needing intervention (attempts >= 3 and mastery_score < 0.3)
+    """
+    # 1. Total students count
+    total_students_stmt = select(func.count(User.id)).where(User.role == "student")
+    total_students = (await db.execute(total_students_stmt)).scalar() or 0
+
+    # 2. Most-missed concept (lowest average mastery among attempted concepts)
+    missed_stmt = (
+        select(
+            Concept.name,
+            func.avg(ConceptMastery.mastery_score).label("avg_score"),
+            func.sum(ConceptMastery.attempts).label("tot_attempts")
+        )
+        .join(ConceptMastery, Concept.id == ConceptMastery.concept_id)
+        .group_by(Concept.id, Concept.name)
+        .order_by(func.avg(ConceptMastery.mastery_score).asc())
+        .limit(1)
+    )
+    missed_res = (await db.execute(missed_stmt)).first()
+    most_missed = None
+    if missed_res:
+        most_missed = MostMissedConcept(
+            concept_name=missed_res[0],
+            avg_mastery=round(float(missed_res[1]), 3),
+            total_attempts=int(missed_res[2] or 0),
+        )
+
+    # 3. Most common misconception (highest-count tag from misconception_events)
+    tag_stmt = (
+        select(
+            MisconceptionTag.name,
+            MisconceptionTag.display_label,
+            func.count(MisconceptionEvent.id).label("event_count")
+        )
+        .join(MisconceptionEvent, MisconceptionTag.id == MisconceptionEvent.tag_id)
+        .group_by(MisconceptionTag.id, MisconceptionTag.name, MisconceptionTag.display_label)
+        .order_by(func.count(MisconceptionEvent.id).desc())
+        .limit(1)
+    )
+    tag_res = (await db.execute(tag_stmt)).first()
+    most_common = None
+    if tag_res:
+        most_common = MostCommonMisconception(
+            tag_name=tag_res[0],
+            display_label=tag_res[1],
+            event_count=int(tag_res[2]),
+        )
+
+    # 4. Students needing intervention (attempts >= 3 and mastery_score < 0.3)
+    interv_stmt = (
+        select(
+            User.id,
+            User.display_name,
+            User.email,
+            Concept.name,
+            ConceptMastery.attempts,
+            ConceptMastery.mastery_score
+        )
+        .join(User, ConceptMastery.user_id == User.id)
+        .join(Concept, ConceptMastery.concept_id == Concept.id)
+        .where(ConceptMastery.attempts >= 3, ConceptMastery.mastery_score < 0.3)
+        .order_by(ConceptMastery.mastery_score.asc(), ConceptMastery.attempts.desc())
+    )
+    interv_res = (await db.execute(interv_stmt)).all()
+    students_needing_intervention = []
+    for row in interv_res:
+        user_id_val = row[0]
+        latest_event_stmt = (
+            select(MisconceptionTag.display_label)
+            .join(MisconceptionEvent, MisconceptionTag.id == MisconceptionEvent.tag_id)
+            .where(MisconceptionEvent.user_id == user_id_val)
+            .order_by(MisconceptionEvent.created_at.desc())
+            .limit(1)
+        )
+        latest_tag = (await db.execute(latest_event_stmt)).scalar_one_or_none()
+        students_needing_intervention.append(
+            StudentInterventionItem(
+                student_id=user_id_val,
+                name=row[1],
+                email=row[2],
+                concept_name=row[3],
+                attempts=row[4],
+                mastery_score=round(float(row[5]), 2),
+                most_recent_misconception=latest_tag or "None recorded",
+            )
+        )
+
+    return InstructorDashboardResponse(
+        status="ok",
+        message=f"Welcome instructor {instructor.display_name}",
+        instructor_id=instructor.id,
+        most_missed_concept=most_missed,
+        most_common_misconception=most_common,
+        students_needing_intervention=students_needing_intervention,
+        total_students=total_students,
+    )
+
 
 
 @app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["Users"])
@@ -822,11 +958,26 @@ async def compare_prediction(
         is_success=is_correct,
     )
 
+    # If prediction was incorrect, classify misconception via LLM asynchronously
+    classified_tag = None
+    if not is_correct:
+        try:
+            classified_tag = await classify_misconception(
+                db=db,
+                user_id=prediction.user_id,
+                prediction_dist=prediction.predicted_distribution,
+                actual_dist=normalized_actual,
+                concept_name="entanglement",
+            )
+        except Exception:
+            pass
+
     return CompareResponse(
         predicted=prediction.predicted_distribution,
         actual=normalized_actual,
         circuit_id=prediction.circuit_id,
         run_id=latest_run.id,
+        misconception_tag=classified_tag,
     )
 
 
@@ -892,7 +1043,7 @@ async def get_debug_bell_state() -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 # 7. AI Tutor Endpoint
 # -----------------------------------------------------------------------------
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 
@@ -1146,6 +1297,103 @@ async def update_concept_mastery(
     await db.commit()
     await db.refresh(mastery)
     return mastery
+
+
+async def classify_misconception(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    prediction_dist: Dict[str, float],
+    actual_dist: Dict[str, float],
+    concept_name: str = "entanglement",
+) -> Optional[str]:
+    """
+    Calls LLM (Gemini) when a student prediction diverges beyond tolerance.
+    Constrains choice to the fixed taxonomy of misconception tags for the concept.
+    Logs result to misconception_events (source: 'ai_classified').
+    Fail-safe: if LLM fails, times out, or returns invalid tag, logs nothing and returns None.
+    """
+    api_key = get_gemini_api_key()
+    if not api_key:
+        return None
+
+    try:
+        concept_stmt = select(Concept).where(func.lower(Concept.name) == concept_name.lower())
+        concept = (await db.execute(concept_stmt)).scalar_one_or_none()
+        if not concept:
+            return None
+
+        tags_stmt = select(MisconceptionTag).where(MisconceptionTag.concept_id == concept.id)
+        tags = (await db.execute(tags_stmt)).scalars().all()
+        if not tags:
+            return None
+
+        tag_names = [t.name for t in tags]
+        tag_lines = "\n".join([f"- {t.name}: {t.display_label}" for t in tags])
+
+        prompt = (
+            f"You are an expert quantum education diagnostic system analyzing a student's misconception.\n\n"
+            f"Context: Student is exploring the concept '{concept.name}' (Bell state creation: H on q0, CNOT with control q0, target q1).\n"
+            f"Expected ideal Bell state distribution: {actual_dist}\n"
+            f"Student's predicted distribution: {prediction_dist}\n\n"
+            f"Available Misconception Taxonomy:\n"
+            f"{tag_lines}\n\n"
+            f"Taxonomy Semantic Definitions:\n"
+            f"- confuses_superposition_with_classical_probability: The student treats quantum superposition as a deterministic classical outcome (e.g. predicting 100% certainty on a single basis state like |00⟩) or misunderstands quantum probability as classical certainty.\n"
+            f"- expects_correlation_without_entangling_gate: The student expects independent, uncorrelated uniform probabilities across all basis states (e.g., |00⟩=0.25, |01⟩=0.25, |10⟩=0.25, |11⟩=0.25) as if qubits were in independent superpositions without entanglement.\n"
+            f"- misreads_zero_amplitude_as_impossible_outcome: The student misinterprets destructive interference or zero amplitude as an intrinsically impossible measurement basis.\n\n"
+            f"CRITICAL RULES:\n"
+            f"1. If the student's prediction clearly matches one of the misconceptions above, return ONLY that exact tag name.\n"
+            f"2. If NONE of the 3 tags fit (for example, if the student predicted an anti-correlated entangled state |01⟩ and |10⟩, which is an inverted phase/correlation error rather than any of the 3 tags above), you MUST respond with 'none'.\n"
+            f"3. Do NOT force-fit a tag if none fits. Respond ONLY with the single tag identifier ({', '.join(tag_names)}) or 'none'. No markdown, no punctuation, no other words."
+        )
+
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 1024,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(
+                GEMINI_URL,
+                params={"key": api_key},
+                json=payload,
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return None
+        parts = candidates[0].get("content", {}).get("parts", [])
+        raw_text = parts[0].get("text", "").strip().lower() if parts else ""
+        cleaned = raw_text.replace("`", "").replace('"', "").replace("'", "").strip()
+
+        if cleaned == "none" or "none" in cleaned:
+            return None
+
+        matched_tag = next((t for t in tags if t.name.lower() == cleaned), None)
+        if not matched_tag:
+            matched_tag = next((t for t in tags if t.name.lower() in cleaned), None)
+
+        if matched_tag:
+            event = MisconceptionEvent(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                tag_id=matched_tag.id,
+                source="ai_classified",
+            )
+            db.add(event)
+            await db.commit()
+            return matched_tag.name
+
+        return None
+    except Exception:
+        return None
+
 
 
 @app.post(
