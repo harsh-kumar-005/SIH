@@ -144,9 +144,24 @@ class PredictionResponse(BaseModel):
 
 class CompareResponse(BaseModel):
     predicted: Dict[str, float]
-    actual: Dict[str, int]
+    actual: Dict[str, float]
     circuit_id: uuid.UUID
     run_id: uuid.UUID
+
+
+class CircuitCreateRequest(BaseModel):
+    qubit_count: int = Field(..., description="Total number of qubits (1-8)")
+    gates: List[GateRequest] = Field(default_factory=list, description="List of gates")
+    code_form: Optional[str] = Field(None, description="Optional OpenQASM or Python representation")
+    owner_id: Optional[uuid.UUID] = Field(None, description="Optional owner user ID")
+
+
+class CircuitResponse(BaseModel):
+    id: uuid.UUID
+    qubit_count: int
+    gates: List[Dict[str, Any]]
+    owner_id: Optional[uuid.UUID] = None
+
 
 
 # -----------------------------------------------------------------------------
@@ -229,6 +244,44 @@ async def create_user(req: UserCreateRequest, db: AsyncSession = Depends(get_db)
 
 
 @app.post(
+    "/circuits",
+    response_model=CircuitResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Circuits"]
+)
+async def create_circuit(
+    req: CircuitCreateRequest,
+    db: AsyncSession = Depends(get_db)
+) -> CircuitResponse:
+    """Creates and persists a quantum circuit definition without running a simulation."""
+    if req.qubit_count <= 0 or req.qubit_count > 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"qubit_count must be between 1 and 8 (inclusive), got {req.qubit_count}",
+        )
+
+    sorted_gates = sorted(req.gates, key=lambda g: g.step_index)
+    circuit = Circuit(
+        id=uuid.uuid4(),
+        owner_id=req.owner_id,
+        qubit_count=req.qubit_count,
+        gates=[g.model_dump() for g in sorted_gates],
+        code_form=req.code_form,
+    )
+    db.add(circuit)
+    await db.commit()
+    await db.refresh(circuit)
+
+    return CircuitResponse(
+        id=circuit.id,
+        qubit_count=circuit.qubit_count,
+        gates=circuit.gates,
+        owner_id=circuit.owner_id,
+    )
+
+
+@app.post(
+
     "/circuits/simulate",
     response_model=CircuitSimulateResponse,
     status_code=status.HTTP_200_OK,
@@ -490,9 +543,20 @@ async def compare_prediction(
         prediction.actual_run_id = latest_run.id
         await db.commit()
 
+    # Normalize raw measurement counts to probability distribution (0-1 scale)
+    raw_counts: Dict[str, int] = latest_run.counts or {}
+    total_shots = sum(raw_counts.values())
+    if total_shots > 0:
+        normalized_actual = {
+            k: round(v / total_shots, 3) for k, v in raw_counts.items()
+        }
+    else:
+        normalized_actual = {k: 0.0 for k in raw_counts.keys()}
+
     return CompareResponse(
         predicted=prediction.predicted_distribution,
-        actual=latest_run.counts,
+        actual=normalized_actual,
         circuit_id=prediction.circuit_id,
         run_id=latest_run.id,
     )
+

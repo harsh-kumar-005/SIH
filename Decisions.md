@@ -218,6 +218,32 @@ The PRD and TRD specify that learning progress, circuit iterations, and student 
 - **Positive:** Type-safe async DB access; robust schema migration trail; append-only auditability.
 - **Maintenance:** Requires running `alembic upgrade head` across deployment environments.
 
+---
+
+## [ADR-009] Probability Normalization and Disambiguated 404 Diagnostics for Predictions
+- **Date:** 2026-09-11
+- **Model / Author:** Gemini 3.8 Flash
+- **Status:** Accepted
+
+#### Context & Motivation
+Students submit predicted probability distributions on a 0–1 scale (e.g. `0.5`, `0.5`), whereas `simulation_runs.counts` stores raw integer shot tallies (e.g. `488`, `512`). Direct visualization or automated grading without normalization forces frontend code to guess shot counts and perform ad-hoc arithmetic. Furthermore, frontend debugging was impaired when a 404 error could mean either "prediction record does not exist" or "the prediction exists but no simulation was ever run for this circuit".
+
+#### Decision & Mechanism
+1. Updated `GET /predictions/{id}/compare` to normalize raw counts against total shots, rounding to 3 decimal places (`round(v / total_shots, 3)`), aligning `predicted` and `actual` distributions on the identical 0–1 scale.
+2. Disambiguated error messages:
+   - Prediction missing: `"Prediction with id {id} not found"`
+   - Circuit unsimulated: `"No simulation run exists yet for circuit {circuit_id}"`
+3. Added `POST /circuits` endpoint allowing creation of unsimulated draft circuits.
+4. Rewrote `test_predictions_workflow.py` with explicit test cases for probability scale checks and distinct 404 diagnosis.
+
+#### Alternatives Considered
+- *Normalizing in frontend client:* Duplicates calculation across web, mobile, and grading microservices; risks division by zero and precision drift.
+- *Generic 404 error without circuit context:* Causes difficult UI debugging when distinguishing missing records from unsimulated circuits.
+
+#### Trade-offs & Consequences
+- **Positive:** Clean mathematical parity between student predictions and empirical results; clear, actionable error diagnostics.
+
+
 
 
 
