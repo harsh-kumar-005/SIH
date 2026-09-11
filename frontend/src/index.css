@@ -838,6 +838,13 @@ body {
   color: var(--collapse-cobalt);
 }
 
+.mode-toggle-btn.progress.active {
+  background: #F5F3FF;
+  border-color: var(--superposition-violet);
+  color: var(--superposition-violet);
+}
+
+
 .noise-banner {
   border-left: 3px solid var(--collapse-cobalt);
   background: var(--surface);
@@ -1302,4 +1309,249 @@ body {
   border-color: var(--error-line);
   color: var(--error-line);
 }
+
+/* ============================================================
+   Concept-Level Progress Panel
+   Paper/ink/hairline design system — flat cards, hairline borders,
+   clean status chips, cobalt mastery fill.
+   ============================================================ */
+
+.progress-panel {
+  padding: 24px;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.progress-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--hairline);
+  gap: 16px;
+}
+
+.progress-title {
+  font-family: var(--font-data);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 4px 0 6px 0;
+  letter-spacing: -0.01em;
+}
+
+.progress-subtitle {
+  font-family: var(--font-prose);
+  font-size: 14px;
+  color: var(--ink-secondary);
+  line-height: 1.5;
+  max-width: 600px;
+}
+
+.progress-summary-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  background: #FFFFFF;
+  border: 1px solid var(--hairline);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.summary-val {
+  font-family: var(--font-data);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--collapse-cobalt);
+}
+
+.summary-label {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.progress-loading {
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: var(--ink-muted);
+  padding: 20px 0;
+}
+
+.concept-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.concept-card {
+  background: #FFFFFF;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.concept-card.mastered {
+  border-left: 3px solid #108250;
+}
+
+.concept-card.in-progress {
+  border-left: 3px solid var(--collapse-cobalt);
+}
+
+.concept-card.not-started {
+  border-left: 3px solid var(--ink-muted);
+}
+
+.concept-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.concept-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.concept-name {
+  font-family: var(--font-data);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: capitalize;
+}
+
+.concept-status-badge {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 100px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.concept-status-badge.mastered {
+  background: rgba(16, 130, 80, 0.1);
+  color: #108250;
+  border: 1px solid rgba(16, 130, 80, 0.3);
+}
+
+.concept-status-badge.in-progress {
+  background: rgba(27, 79, 224, 0.08);
+  color: var(--collapse-cobalt);
+  border: 1px solid rgba(27, 79, 224, 0.25);
+}
+
+.concept-status-badge.not-started {
+  background: rgba(136, 144, 160, 0.1);
+  color: var(--ink-muted);
+  border: 1px solid var(--hairline);
+}
+
+.concept-attempts-badge {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--ink-secondary);
+  background: var(--paper);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.concept-description {
+  font-family: var(--font-prose);
+  font-size: 13px;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+  flex-grow: 1;
+}
+
+.concept-mastery-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.concept-mastery-bar-track {
+  flex-grow: 1;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.concept-mastery-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.concept-mastery-bar-fill.mastered {
+  background: #108250;
+}
+
+.concept-mastery-bar-fill.in-progress {
+  background: var(--collapse-cobalt);
+}
+
+.concept-mastery-bar-fill.not-started {
+  background: var(--hairline);
+}
+
+.concept-pct-label {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 34px;
+  text-align: right;
+}
+
+.concept-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.concept-updated-label {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+.concept-action-btn {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--collapse-cobalt);
+  border: 1px solid rgba(27, 79, 224, 0.3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.concept-action-btn:hover {
+  background: var(--collapse-cobalt);
+  color: #FFFFFF;
+}
+
 

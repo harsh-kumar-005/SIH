@@ -498,12 +498,46 @@ All previous sessions used an anonymous-user helper (`GET /users/anonymous`) tha
 - ✅ RBAC ready — `require_instructor` dependency available for future instructor dashboard.
 - ✅ No persistence risk — in-memory token never touches disk.
 - ⚠️ Page refresh logs user out — acceptable for demo; would need refresh tokens in production.
-- ⚠️ bcrypt 3.2.2 pin — must be revisited if passlib releases a compatibility update.
+- Vite HMR picked up `App.jsx` and `index.css` with no compile errors (confirmed in task-694 log).
+
+---
+
+## [ADR-017] Concept-Level Progress Tracking & Materialized Mastery Ledger
+- **Date:** 2026-09-11
+- **Model / Author:** Antigravity (Google DeepMind)
+- **Status:** Accepted
+
+#### Context & Motivation
+Following authentication and ownership derivation, student learning progress needed to be tracked against a formal domain curriculum (PRD §6.16, schema doc §2.2 & §2.10). Rather than running heavy aggregation queries on raw `simulation_runs` and `predictions` on every dashboard load, the schema requires a materialized `concept_mastery` table linking users and concepts.
+
+#### Decision & Mechanism
+1. **Database Schema & Alembic Migration**:
+   - `concepts`: `id` (UUID PK), `name` (unique text index), `description` (text).
+   - `concept_mastery`: Composite PK `(user_id, concept_id)` with CASCADE foreign keys to `users.id` and `concepts.id`. `mastery_score` (float checked between 0.0 and 1.0), `attempts` (integer default 0), and `last_updated` (timestamptz with onupdate now()).
+   - Seeded in Alembic migration (`97ab331c00af_create_concepts_and_concept_mastery.py`): active module `"entanglement"`, plus placeholder rows `"superposition"`, `"gates"`, and `"measurement"`.
+2. **Mastery Update Semantics**:
+   - Helper `update_concept_mastery(db, user_id, concept_name, is_success, delta=0.1)`:
+     - Always increments `attempts` by 1.
+     - On success (prediction within $\pm 0.08$ tolerance, or debug challenge solved, or noise lab run): increments `mastery_score` by `+0.1` (clamped at `1.0`).
+     - On failure: increments `attempts`, but never decrements `mastery_score` (non-regressive pedagogical model).
+3. **Event Hooks & APIs**:
+   - `GET /predictions/{id}/compare`: Automatically evaluates prediction fidelity against actual counts within $\pm 0.08$ and calls `update_concept_mastery` for `"entanglement"`.
+   - `POST /progress/event`: Authenticated endpoint allowing frontend and test runners to trigger explicit mastery events (e.g. `debug_solved`, `noise_lab_completed`).
+   - `GET /progress/me`: Authenticated endpoint returning all concepts with their mastery scores, attempts, status tags (`Not Started`, `In Progress`, `Mastered`), and overall summary metrics.
+4. **Frontend Progress View**:
+   - Mode toggle button `📊 Progress` in workspace header (`experimentMode === 'progress'`).
+   - Renders a clean concept mastery grid using the paper/ink/hairline design system.
+   - Auto-refetches progress on login, compare fetch, debug solve, and noisy run completion.
 
 #### Verification
-- `test_auth.py`: signup (201), duplicate → 409, login (200 + JWT), wrong password → 401 generic, spoofing attempt → rejected (ownership from JWT), RBAC instructor route → 403 for student.
-- Server logs confirm: `POST /auth/login → 200 OK`, `POST /circuits/simulate → 200 OK` with Bearer token.
-- Vite HMR picked up `App.jsx` and `index.css` with no compile errors (confirmed in task-694 log).
+- `test_progress.py` verified all 5 lifecycle stages:
+  1. Fresh user: all 4 concepts returned at `0.0` score, `0` attempts, `"Not Started"`.
+  2. Prediction + compare on Bell state: `entanglement` updated to `0.1` score, `1` attempt, `"In Progress"`.
+  3. Debug Mode solve event: `entanglement` ticked up to `0.2` score, `2` attempts.
+  4. Intentionally incorrect prediction: attempts incremented to `3`, but score was preserved at `0.2` (did not regress).
+  5. Final `GET /progress/me` output confirmed structured JSON payload.
+- Frontend build: `npm run build` completed in 144ms with 0 errors.
+
 
 
 

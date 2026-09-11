@@ -1,8 +1,8 @@
 # Session Handover & State (`Handover.md`)
 
-**Current Date & Time:** 2026-09-11 15:15 IST
+**Current Date & Time:** 2026-09-11 16:15 IST
 **Active Model:** Antigravity (Google DeepMind)
-**Status:** ADR-016 complete — Full authentication system (backend + frontend) shipped and verified.
+**Status:** ADR-017 complete — Concept-level progress tracking and materialized mastery ledger implemented and fully verified across 5 lifecycle stages.
 
 ---
 
@@ -38,25 +38,30 @@
   - Auto-fires grounded AI tutor debrief on noise changes. Verified provably with [test_noise_lab.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_noise_lab.py).
 - **Real Authentication — Backend + Frontend (ADR-016)**: Replaced anonymous-user pattern with a full signed-JWT auth system.
   - **Backend** (`main.py`): `POST /auth/signup` (bcrypt hash via passlib, 409 on duplicate), `POST /auth/login` (HS256 JWT via python-jose, 24h expiry, 401 generic — no email leak). `get_current_user` dependency extracts JWT from `Authorization: Bearer` header; `require_instructor` RBAC dependency. `POST /circuits`, `POST /predictions`, `POST /tutor/ask` derive ownership from JWT — client never sends `owner_id`/`user_id`. Verified with [test_auth.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_auth.py).
-  - **Frontend** (`App.jsx`): In-memory-only JWT (`authToken` React state + `authTokenRef` ref — never localStorage). `authFetch()` wrapper injects `Authorization: Bearer` on every API call. Full-page auth screen (login/signup) shown when no token held; disappears on successful login. Signup auto-redirects to login with success banner. Header shows user badge (name + role pill) and a Log Out button that wipes all in-memory auth state. All existing fetch calls (`simulate`, `circuits`, `predictions`, `compare`, `tutor`, `debugBellState`) migrated to `authFetch()`.
-  - **CSS** (`index.css`): Dark glassmorphism auth card (void background `#0D0F14`, subtle cobalt radial glow, frosted-glass card), animated entrance, tab switcher, error/success banners, header user badge with role pill and logout button.
+  - **Frontend** (`App.jsx`): In-memory-only JWT (`authToken` React state + `authTokenRef` ref — never localStorage). `authFetch()` wrapper injects `Authorization: Bearer` on every API call.
+- **Concept-Level Progress Tracking & Mastery Ledger (ADR-017)**:
+  - **Database Migration**: Created `concepts` and `concept_mastery` tables via Alembic revision `97ab331c00af`. Seeded `"entanglement"` along with `"superposition"`, `"gates"`, and `"measurement"`.
+  - **Mastery Update Logic**: `update_concept_mastery` helper increments attempts on every learning event; increments mastery (+0.1) on success; retains score on incorrect attempt.
+  - **Endpoints**: `GET /predictions/{id}/compare` auto-updates entanglement mastery; `POST /progress/event` records explicit debug solve and noise events; `GET /progress/me` returns all concepts with their mastery statuses.
+  - **Frontend Integration**: Added `📊 Progress` mode to header mode-toggle group. Shows concept cards with animated mastery bars (0-100%), attempts badge, status tag (`Not Started`, `In Progress`, `Mastered`), and auto-refetches after runs, comparisons, and debug challenge solves.
+  - **Automated Verification**: [test_progress.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/test_progress.py) passed all 5 stages provably.
 
 ---
 
 ## 2. In-Flight Work & Active Context
-- All three experiment modes (Standard, Debug Mode, Noise Lab) verified end-to-end.
-- Authentication fully operational: backend JWT flow verified via `test_auth.py`; frontend auth screen gated by `authToken` React state.
-- Backend (`main.py`) running on `http://localhost:8000` (task-358).
-- Frontend (`App.jsx` + `index.css`) running on `http://localhost:5174` (task-694).
-- Automated tests passing: `test_api.py` (6/6), `test_noise_lab.py` (4/4), `test_auth.py` (RBAC + ownership verified).
+- All four experiment & learning views (Standard, Debug Mode, Noise Lab, Concept Progress) are operational.
+- Authentication fully operational: backend JWT flow verified via `test_auth.py`.
+- Progress tracking verified via `test_progress.py`.
+- Backend running on `http://localhost:8000` (task-358).
+- Frontend running on `http://localhost:5173` (task-225/task-694).
+- Automated tests passing: `test_auth.py` (all 8 checks passed), `test_progress.py` (all 5 stages passed).
 
 ---
 
 ## 3. Known Blockers / Open Questions
-- Browser subagent CDP quota exhausted — auth UI verified via Python test scripts and server logs (`POST /auth/login → 200 OK`).
 - Lesson panel (collapsible thin rail per §4 wireframe) not yet implemented.
-- Prediction stepper UX uses ±5% buttons; drag-to-set bars are a future enhancement.
-- `passlib.exc.UnknownHashError` appears in older test fixtures only — live signup/login unaffected (bcrypt 3.2.2 pinned for passlib compatibility).
+- Superposition & Gate modules exist as placeholder DB concepts awaiting dedicated curriculum circuits.
+
 
 ---
 

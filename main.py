@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel, depolarizing_error
@@ -33,7 +33,7 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 
 from db.database import get_db
-from db.models import User, Circuit, SimulationRun, Prediction
+from db.models import User, Circuit, SimulationRun, Prediction, Concept, ConceptMastery
 from tutor_prompt import SYSTEM_PROMPT, format_tutor_user_message
 
 # -----------------------------------------------------------------------------
@@ -203,6 +203,28 @@ class TutorAskRequest(BaseModel):
 
 class TutorAskResponse(BaseModel):
     response: str
+
+
+class ConceptProgressItem(BaseModel):
+    concept_id: uuid.UUID
+    name: str
+    description: str
+    mastery_score: float = Field(0.0, ge=0.0, le=1.0)
+    attempts: int = Field(0, ge=0)
+    status: Literal["Not Started", "In Progress", "Mastered"]
+    last_updated: Optional[datetime] = None
+
+
+class UserProgressResponse(BaseModel):
+    concepts: List[ConceptProgressItem]
+    overall_mastered: int
+    total_concepts: int
+
+
+class ProgressEventRequest(BaseModel):
+    concept: str = Field("entanglement", description="Name of concept, e.g. 'entanglement'")
+    event_type: str = Field(..., description="Event type, e.g. 'debug_solved', 'noise_lab_completed'")
+    success: bool = Field(True, description="Whether event was successful")
 
 
 
@@ -781,12 +803,32 @@ async def compare_prediction(
     else:
         normalized_actual = {k: 0.0 for k in raw_counts.keys()}
 
+    # Evaluate prediction accuracy against actual distribution (tolerance 0.08)
+    is_correct = True
+    if not prediction.predicted_distribution:
+        is_correct = False
+    else:
+        for state, pred_p in prediction.predicted_distribution.items():
+            act_p = normalized_actual.get(state, 0.0)
+            if abs(pred_p - act_p) > 0.08:
+                is_correct = False
+                break
+
+    # Update concept mastery for the student (Bell state is part of the entanglement module)
+    await update_concept_mastery(
+        db=db,
+        user_id=prediction.user_id,
+        concept_name="entanglement",
+        is_success=is_correct,
+    )
+
     return CompareResponse(
         predicted=prediction.predicted_distribution,
         actual=normalized_actual,
         circuit_id=prediction.circuit_id,
         run_id=latest_run.id,
     )
+
 
 
 # -----------------------------------------------------------------------------
@@ -1057,4 +1099,154 @@ async def tutor_ask(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Could not reach Gemini API: {str(e)}",
         )
+
+
+# -----------------------------------------------------------------------------
+# 8. Concept Progress & Mastery Helper and Endpoints
+# -----------------------------------------------------------------------------
+async def update_concept_mastery(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    concept_name: str,
+    is_success: bool,
+    delta: float = 0.1,
+) -> Optional[ConceptMastery]:
+    """
+    Updates or initializes student concept mastery:
+    - Increments attempts on every evaluated learning event.
+    - If is_success is True: increments mastery_score by delta (default +0.1, capped at 1.0).
+    - If is_success is False: attempts incremented, mastery_score does NOT decrease.
+    """
+    concept_stmt = select(Concept).where(func.lower(Concept.name) == concept_name.lower())
+    concept = (await db.execute(concept_stmt)).scalar_one_or_none()
+    if not concept:
+        return None
+
+    mastery_stmt = select(ConceptMastery).where(
+        ConceptMastery.user_id == user_id,
+        ConceptMastery.concept_id == concept.id,
+    )
+    mastery = (await db.execute(mastery_stmt)).scalar_one_or_none()
+
+    if not mastery:
+        init_score = min(1.0, round(delta, 2)) if is_success else 0.0
+        mastery = ConceptMastery(
+            user_id=user_id,
+            concept_id=concept.id,
+            mastery_score=init_score,
+            attempts=1,
+        )
+        db.add(mastery)
+    else:
+        mastery.attempts += 1
+        if is_success:
+            mastery.mastery_score = min(1.0, round(mastery.mastery_score + delta, 2))
+        mastery.last_updated = func.now()
+
+    await db.commit()
+    await db.refresh(mastery)
+    return mastery
+
+
+@app.post(
+    "/progress/event",
+    response_model=ConceptProgressItem,
+    status_code=status.HTTP_200_OK,
+    tags=["Progress Tracking"]
+)
+async def record_progress_event(
+    req: ProgressEventRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> ConceptProgressItem:
+    """
+    Records a learning progress event (e.g., debug challenge solved, noise lab session completed).
+    Increments attempts and updates concept mastery score.
+    """
+    mastery = await update_concept_mastery(
+        db=db,
+        user_id=current_user.id,
+        concept_name=req.concept,
+        is_success=req.success,
+    )
+    if not mastery:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Concept '{req.concept}' not found",
+        )
+
+    concept = (await db.execute(select(Concept).where(Concept.id == mastery.concept_id))).scalar_one()
+    status_tag = "Not Started" if mastery.attempts == 0 else ("Mastered" if mastery.mastery_score >= 0.8 else "In Progress")
+    return ConceptProgressItem(
+        concept_id=concept.id,
+        name=concept.name,
+        description=concept.description,
+        mastery_score=mastery.mastery_score,
+        attempts=mastery.attempts,
+        status=status_tag,
+        last_updated=mastery.last_updated,
+    )
+
+
+@app.get(
+    "/progress/me",
+    response_model=UserProgressResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Progress Tracking"]
+)
+async def get_my_progress(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> UserProgressResponse:
+    """
+    Returns mastery status across all domain concepts for the authenticated student.
+    Unattempted concepts return mastery_score 0.0 and status 'Not Started'.
+    """
+    concepts_stmt = select(Concept).order_by(Concept.name.asc())
+    concepts = (await db.execute(concepts_stmt)).scalars().all()
+
+    mastery_stmt = select(ConceptMastery).where(ConceptMastery.user_id == current_user.id)
+    masteries = (await db.execute(mastery_stmt)).scalars().all()
+    mastery_map = {m.concept_id: m for m in masteries}
+
+    items: List[ConceptProgressItem] = []
+    overall_mastered = 0
+
+    for c in concepts:
+        m = mastery_map.get(c.id)
+        if m:
+            score = m.mastery_score
+            attempts = m.attempts
+            last_updated = m.last_updated
+            if attempts == 0:
+                status_tag = "Not Started"
+            elif score >= 0.8:
+                status_tag = "Mastered"
+                overall_mastered += 1
+            else:
+                status_tag = "In Progress"
+        else:
+            score = 0.0
+            attempts = 0
+            last_updated = None
+            status_tag = "Not Started"
+
+        items.append(
+            ConceptProgressItem(
+                concept_id=c.id,
+                name=c.name,
+                description=c.description,
+                mastery_score=score,
+                attempts=attempts,
+                status=status_tag,
+                last_updated=last_updated,
+            )
+        )
+
+    return UserProgressResponse(
+        concepts=items,
+        overall_mastered=overall_mastered,
+        total_concepts=len(concepts),
+    )
+
 

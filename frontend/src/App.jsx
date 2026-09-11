@@ -29,6 +29,8 @@ const API = {
   simulate:       `${BASE}/circuits/simulate`,
   predict:        `${BASE}/predictions`,
   compare:        (id) => `${BASE}/predictions/${id}/compare`,
+  progress:       `${BASE}/progress/me`,
+  progressEvent:  `${BASE}/progress/event`,
   tutor:          `${BASE}/tutor/ask`,
   debugBellState: `${BASE}/experiments/debug/bell-state`,
   signup:         `${BASE}/auth/signup`,
@@ -125,6 +127,11 @@ export default function App() {
   // ── Compare ───────────────────────────────────────────────────────────────
   const [compareData,        setCompareData]        = useState(null); // {predicted, actual}
   const [compareError,       setCompareError]       = useState(null);
+
+  // ── Concept Progress ───────────────────────────────────────────────────────
+  const [progressData,       setProgressData]       = useState(null);
+  const [progressLoading,    setProgressLoading]    = useState(false);
+  const [progressError,      setProgressError]      = useState(null);
 
   // ── Tutor ─────────────────────────────────────────────────────────────────
   const [tutorMessages,      setTutorMessages]      = useState([
@@ -288,6 +295,32 @@ export default function App() {
     tutorBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [tutorMessages]);
 
+  // ─── Fetch Concept Progress ───────────────────────────────────────────────
+  const fetchProgress = useCallback(async () => {
+    if (!authTokenRef.current) return;
+    setProgressLoading(true);
+    setProgressError(null);
+    try {
+      const res = await authFetch(API.progress);
+      if (res.ok) {
+        const data = await res.json();
+        setProgressData(data);
+      } else {
+        setProgressError(`Failed to load progress (${res.status})`);
+      }
+    } catch {
+      setProgressError('Network error — could not load progress');
+    } finally {
+      setProgressLoading(false);
+    }
+  }, [authFetch]);
+
+  useEffect(() => {
+    if (authToken) {
+      fetchProgress();
+    }
+  }, [authToken, fetchProgress]);
+
   // ─── Derived: tutor context line ─────────────────────────────────────────
   // Shows current sequencing state so the tutor panel is never misleading
   const tutorContextLine = runId
@@ -395,6 +428,15 @@ export default function App() {
           addTutorMessage('grounded-observation',
             `Run complete! Target achieved: |00⟩ at ${(p00 * 100).toFixed(0)}%, |11⟩ at ${(p11 * 100).toFixed(0)}%. You fixed the bug!`
           );
+          // Auto-record debug solve event to concept mastery
+          authFetch(API.progressEvent, {
+            method: 'POST',
+            body: JSON.stringify({
+              concept: 'entanglement',
+              event_type: 'debug_solved',
+              success: true,
+            }),
+          }).then(() => fetchProgress()).catch(() => {});
         } else {
           const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
           addTutorMessage('grounded-observation',
@@ -498,6 +540,8 @@ export default function App() {
         return;
       }
       setCompareData(data);
+      // Auto-refetch progress as prediction comparison updates mastery
+      fetchProgress();
     } catch {
       setCompareError('Network error — could not fetch comparison.');
     }
@@ -969,6 +1013,14 @@ export default function App() {
             >
               🔬 Noise Lab
             </button>
+            <button
+              type="button"
+              id="btn-progress-mode"
+              className={`mode-toggle-btn progress${experimentMode === 'progress' ? ' active' : ''}`}
+              onClick={() => { setExperimentMode('progress'); fetchProgress(); }}
+            >
+              📊 Progress
+            </button>
           </div>
         </div>
         <div className="header-right-group">
@@ -976,7 +1028,9 @@ export default function App() {
             <span
               className={`status-dot ${predLocked ? 'locked' : ''} ${runId ? 'run' : ''}`}
             />
-            {experimentMode === 'noise'
+            {experimentMode === 'progress'
+              ? 'Concept Mastery Tracker'
+              : experimentMode === 'noise'
               ? `Noise Lab · ${Math.round(noiseLevel * 100)}% Noise`
               : experimentMode === 'debug'
               ? 'Debug Challenge active'
@@ -1008,21 +1062,93 @@ export default function App() {
       {/* ══ LEFT COLUMN — circuit + prediction + results ═══════════════════════ */}
       <main className="workspace-main">
 
-        {/* ── Debug Mode Banner (Amber Accent) ────────────────────────────────── */}
-        {experimentMode === 'debug' && debugChallenge && (
-          <div className="debug-banner" role="region" aria-label="Debug Challenge">
-            <span className="debug-badge">Debug Challenge · Broken Bell State</span>
-            <p className="debug-prompt-text">{debugChallenge.prompt}</p>
-            <div className="debug-target-row">
-              <span className="debug-target-pill">
-                Target: <strong>|00⟩ ≈ 50%, |11⟩ ≈ 50%</strong> (tolerance ±5%)
-              </span>
-              <span className="palette-hint" style={{ margin: 0 }}>
-                Edit gates on canvas, then Run Circuit to test your fix.
-              </span>
+        {experimentMode === 'progress' ? (
+          <div className="progress-panel" role="region" aria-label="Concept Mastery Progress">
+            <div className="progress-panel-header">
+              <div>
+                <div className="section-label">curriculum progression · mastery tracking</div>
+                <h2 className="progress-title">Concept-Level Mastery</h2>
+                <p className="progress-subtitle">
+                  Mastery increases as you verify predictions, fix buggy circuits in Debug Mode, and explore noise physics.
+                </p>
+              </div>
+              <div className="progress-summary-pill">
+                <span className="summary-val">{progressData?.overall_mastered ?? 0} / {progressData?.total_concepts ?? 4}</span>
+                <span className="summary-label">Concepts Mastered</span>
+              </div>
+            </div>
+
+            {progressError && (
+              <div className="inline-error" role="alert">{progressError}</div>
+            )}
+
+            {progressLoading && !progressData && (
+              <div className="progress-loading">Loading mastery data…</div>
+            )}
+
+            <div className="concept-grid">
+              {(progressData?.concepts || []).map((c) => {
+                const pct = Math.round(c.mastery_score * 100);
+                const statusClass = c.status === 'Mastered' ? 'mastered' : c.status === 'In Progress' ? 'in-progress' : 'not-started';
+                return (
+                  <div key={c.concept_id} className={`concept-card ${statusClass}`}>
+                    <div className="concept-card-top">
+                      <div className="concept-card-title-group">
+                        <span className="concept-name">{c.name}</span>
+                        <span className={`concept-status-badge ${statusClass}`}>{c.status}</span>
+                      </div>
+                      <span className="concept-attempts-badge">{c.attempts} {c.attempts === 1 ? 'attempt' : 'attempts'}</span>
+                    </div>
+                    <p className="concept-description">{c.description}</p>
+
+                    <div className="concept-mastery-row">
+                      <div className="concept-mastery-bar-track" aria-hidden="true">
+                        <div
+                          className={`concept-mastery-bar-fill ${statusClass}`}
+                          style={{ width: `${Math.max(pct, 2)}%` }}
+                        />
+                      </div>
+                      <span className="concept-pct-label">{pct}%</span>
+                    </div>
+
+                    <div className="concept-card-footer">
+                      <span className="concept-updated-label">
+                        {c.last_updated
+                          ? `Updated ${new Date(c.last_updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                          : 'Not yet attempted'}
+                      </span>
+                      {c.name === 'entanglement' && (
+                        <button
+                          type="button"
+                          className="concept-action-btn"
+                          onClick={exitSpecialModes}
+                        >
+                          Practice Module →
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        )}
+        ) : (
+          <>
+            {/* ── Debug Mode Banner (Amber Accent) ────────────────────────────────── */}
+            {experimentMode === 'debug' && debugChallenge && (
+              <div className="debug-banner" role="region" aria-label="Debug Challenge">
+                <span className="debug-badge">Debug Challenge · Broken Bell State</span>
+                <p className="debug-prompt-text">{debugChallenge.prompt}</p>
+                <div className="debug-target-row">
+                  <span className="debug-target-pill">
+                    Target: <strong>|00⟩ ≈ 50%, |11⟩ ≈ 50%</strong> (tolerance ±5%)
+                  </span>
+                  <span className="palette-hint" style={{ margin: 0 }}>
+                    Edit gates on canvas, then Run Circuit to test your fix.
+                  </span>
+                </div>
+              </div>
+            )}
 
         {/* ── Noise Lab Banner ────────────────────────────────────────────────── */}
         {experimentMode === 'noise' && (
@@ -1706,6 +1832,9 @@ export default function App() {
               )}
             </div>
           </section>
+        )}
+
+          </>
         )}
 
       </main>

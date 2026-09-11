@@ -44,6 +44,7 @@ class User(Base):
     # Relationships
     circuits = relationship("Circuit", back_populates="owner")
     predictions = relationship("Prediction", back_populates="user")
+    concept_masteries = relationship("ConceptMastery", back_populates="user", cascade="all, delete-orphan")
 
 
 class Circuit(Base):
@@ -109,3 +110,43 @@ class Prediction(Base):
     user = relationship("User", back_populates="predictions")
     circuit = relationship("Circuit", back_populates="predictions")
     actual_run = relationship("SimulationRun", back_populates="predictions")
+
+
+class Concept(Base):
+    """
+    concepts table:
+    Core domain concepts defining the pedagogical curriculum and knowledge graph.
+    """
+    __tablename__ = "concepts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Text, unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=False)
+
+    # Relationships
+    masteries = relationship("ConceptMastery", back_populates="concept", cascade="all, delete-orphan")
+
+
+class ConceptMastery(Base):
+    """
+    concept_mastery table:
+    Materialized fast-read source for student progress and adaptive recommendations.
+    Composite PK on (user_id, concept_id).
+    """
+    __tablename__ = "concept_mastery"
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    concept_id = Column(UUID(as_uuid=True), ForeignKey("concepts.id", ondelete="CASCADE"), primary_key=True)
+    mastery_score = Column(
+        Float,
+        CheckConstraint("mastery_score >= 0.0 AND mastery_score <= 1.0", name="check_mastery_score_range"),
+        nullable=False,
+        default=0.0
+    )
+    attempts = Column(Integer, nullable=False, default=0)
+    last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="concept_masteries")
+    concept = relationship("Concept", back_populates="masteries")
+
