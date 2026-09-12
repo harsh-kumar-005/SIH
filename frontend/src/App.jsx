@@ -26,16 +26,17 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 // ─── API Endpoints ────────────────────────────────────────────────────────────
 const BASE = 'http://localhost:8000';
 const API = {
-  simulate:       `${BASE}/circuits/simulate`,
-  predict:        `${BASE}/predictions`,
-  compare:        (id) => `${BASE}/predictions/${id}/compare`,
-  progress:       `${BASE}/progress/me`,
-  progressEvent:  `${BASE}/progress/event`,
-  tutor:          `${BASE}/tutor/ask`,
-  debugBellState: `${BASE}/experiments/debug/bell-state`,
-  signup:              `${BASE}/auth/signup`,
-  login:               `${BASE}/auth/login`,
-  instructorDashboard: `${BASE}/instructor/dashboard`,
+  simulate:             `${BASE}/circuits/simulate`,
+  predict:              `${BASE}/predictions`,
+  compare:              (id) => `${BASE}/predictions/${id}/compare`,
+  progress:             `${BASE}/progress/me`,
+  progressEvent:        `${BASE}/progress/event`,
+  tutor:                `${BASE}/tutor/ask`,
+  debugBellState:       `${BASE}/experiments/debug/bell-state`,
+  guidedSuperposition:  `${BASE}/experiments/guided/superposition`,
+  signup:               `${BASE}/auth/signup`,
+  login:                `${BASE}/auth/login`,
+  instructorDashboard:  `${BASE}/instructor/dashboard`,
 };
 
 // ─── Circuit Constants ────────────────────────────────────────────────────────
@@ -89,10 +90,12 @@ export default function App() {
   const [simResult,          setSimResult]          = useState(null);
   const [simError,           setSimError]           = useState(null);
 
-  // ── Experiment Mode (Standard vs Debug vs Noise Lab) ───────────────────────
-  const [experimentMode,     setExperimentMode]     = useState('standard'); // 'standard' | 'debug' | 'noise'
-  const [debugChallenge,     setDebugChallenge]     = useState(null);
-  const [debugHasRunOnce,    setDebugHasRunOnce]    = useState(false);
+  // ── Experiment Mode (Standard | Debug | Noise | Superposition | Progress | Instructor) ──
+  const [experimentMode,          setExperimentMode]          = useState('standard');
+  const [debugChallenge,          setDebugChallenge]          = useState(null);
+  const [debugHasRunOnce,         setDebugHasRunOnce]         = useState(false);
+  // Superposition guided module data (lesson_text, prediction_prompt, target_behavior, starter_circuit)
+  const [superpositionChallenge,  setSuperpositionChallenge]  = useState(null);
 
   // ── Noise Lab ─────────────────────────────────────────────────────────────
   const [noiseLevel,         setNoiseLevel]         = useState(0.0);
@@ -359,6 +362,8 @@ export default function App() {
     ? 'Cohort Analytics & Intervention View'
     : experimentMode === 'progress'
     ? 'Concept Mastery Progression'
+    : experimentMode === 'superposition'
+    ? 'Superposition Module · H Gate'
     : runId
     ? `Circuit ${circuitId?.slice(0, 8)}… · run completed`
     : predLocked
@@ -377,8 +382,8 @@ export default function App() {
   }
 
   function handleSlotClick(qubit, step) {
-    // Read-only in Noise Lab
-    if (experimentMode === 'noise') return;
+    // Read-only in Noise Lab and Superposition module (circuit is pre-loaded, H on q0)
+    if (experimentMode === 'noise' || experimentMode === 'superposition') return;
 
     // Circuit is frozen once prediction is locked — prevent silent post-lock edits
     // that would make the prediction meaningless. Student must Clear to start over.
@@ -485,6 +490,26 @@ export default function App() {
           setDebugHasRunOnce(true);
           autoAskDebugTutor(data.circuit_id, data.run_id);
         }
+      } else if (experimentMode === 'superposition') {
+        // Superposition module: check 50/50 on |00⟩ and |01⟩
+        const p00 = (counts['00'] || 0) / total;
+        const p01 = (counts['01'] || 0) / total;
+        const supOk = Math.abs(p00 - 0.5) <= 0.08 && Math.abs(p01 - 0.5) <= 0.08;
+        if (supOk) {
+          addTutorMessage('grounded-observation',
+            `Run complete! |00⟩ at ${(p00 * 100).toFixed(0)}%, |01⟩ at ${(p01 * 100).toFixed(0)}% — equal superposition confirmed.`
+          );
+          // Credit superposition mastery
+          authFetch(API.progressEvent, {
+            method: 'POST',
+            body: JSON.stringify({ concept: 'superposition', event_type: 'superposition_verified', success: true }),
+          }).then(() => fetchProgress()).catch(() => {});
+        } else {
+          addTutorMessage('grounded-observation',
+            `Run complete. Expected 50% on |00⟩ and |01⟩ — observed |00⟩=${(p00 * 100).toFixed(0)}%, |01⟩=${(p01 * 100).toFixed(0)}%. Try placing H on q0.`
+          );
+        }
+        if (predictionId) fetchCompare(predictionId);
       } else {
         // Standard mode observation
         const topState = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
@@ -523,6 +548,11 @@ export default function App() {
     setPredLoading(true);
     setPredError(null);
 
+    // Derive the active concept so compare_prediction credits the correct mastery ledger.
+    // 'superposition' mode tags predictions with concept:'superposition'; all other
+    // modes remain 'entanglement' (the only module with a real circuit so far).
+    const activeConcept = experimentMode === 'superposition' ? 'superposition' : 'entanglement';
+
     try {
       // Step 1: Persist the circuit definition to DB so prediction has a valid circuit_id.
       // We do NOT simulate yet — that comes after the student commits their prediction.
@@ -540,11 +570,13 @@ export default function App() {
       setCircuitId(newCircuitId);
 
       // Step 2: Lock the student's prediction against that circuit.
+      // Include concept so the backend stores it as _concept sentinel in predicted_distribution.
       const predRes = await authFetch(API.predict, {
         method: 'POST',
         body: JSON.stringify({
           circuit_id:             newCircuitId,
           predicted_distribution: predDist,
+          concept:                activeConcept,
         }),
       });
       const predData = await predRes.json();
@@ -580,6 +612,41 @@ export default function App() {
       fetchProgress();
     } catch {
       setCompareError('Network error — could not fetch comparison.');
+    }
+  }
+
+  // ─── Superposition Guided Module Handler ──────────────────────────────────
+  async function enterSuperpositionMode() {
+    setSimLoading(true);
+    setSimError(null);
+    try {
+      const res = await authFetch(API.guidedSuperposition);
+      const data = await res.json();
+      if (!res.ok) {
+        setSimError('Failed to load superposition module.');
+        return;
+      }
+      setExperimentMode('superposition');
+      setSuperpositionChallenge(data);
+      // Pre-load the starter circuit (H on q0) — canvas is read-only in this mode
+      setGates(data.starter_circuit?.gates || []);
+      setCnotControl(null);
+      setSimResult(null);
+      setCircuitId(null);
+      setRunId(null);
+      setPredLocked(false);
+      setPredictionId(null);
+      setCompareData(null);
+      setCurrentStep(0);
+      // Reset prediction distribution to 25% each so student must think about their answer
+      setPredDist({ '00': 0.25, '01': 0.25, '10': 0.25, '11': 0.25 });
+      addTutorMessage('grounded-observation',
+        `Superposition module loaded. ${data.prediction_prompt} Lock your prediction, then run the circuit.`
+      );
+    } catch {
+      setSimError('Network error — could not load superposition module.');
+    } finally {
+      setSimLoading(false);
     }
   }
 
@@ -819,7 +886,10 @@ export default function App() {
           circuit_id: circuitId,
           run_id: runId,
           question: q,
-          experiment_type: experimentMode === 'debug' ? 'debug' : experimentMode === 'noise' ? 'noise' : undefined,
+          experiment_type: experimentMode === 'debug' ? 'debug'
+            : experimentMode === 'noise' ? 'noise'
+            : experimentMode === 'superposition' ? 'superposition'
+            : undefined,
           noise_level: experimentMode === 'noise' ? noiseLevel : undefined,
           ideal_counts: experimentMode === 'noise' ? (idealSimResult?.measurement_counts || undefined) : undefined,
         }),
@@ -1051,6 +1121,14 @@ export default function App() {
             </button>
             <button
               type="button"
+              id="btn-superposition-mode"
+              className={`mode-toggle-btn superposition${experimentMode === 'superposition' ? ' active' : ''}`}
+              onClick={enterSuperpositionMode}
+            >
+              🌊 Superposition
+            </button>
+            <button
+              type="button"
               id="btn-progress-mode"
               className={`mode-toggle-btn progress${experimentMode === 'progress' ? ' active' : ''}`}
               onClick={() => { setExperimentMode('progress'); fetchProgress(); }}
@@ -1078,6 +1156,8 @@ export default function App() {
               ? 'Cohort Analytics · Instructor View'
               : experimentMode === 'progress'
               ? 'Concept Mastery Tracker'
+              : experimentMode === 'superposition'
+              ? 'Superposition Module · H Gate'
               : experimentMode === 'noise'
               ? `Noise Lab · ${Math.round(noiseLevel * 100)}% Noise`
               : experimentMode === 'debug'
@@ -1374,6 +1454,15 @@ export default function App() {
                           Practice Module →
                         </button>
                       )}
+                      {c.name === 'superposition' && (
+                        <button
+                          type="button"
+                          className="concept-action-btn superposition"
+                          onClick={enterSuperpositionMode}
+                        >
+                          Practice Module →
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1382,6 +1471,25 @@ export default function App() {
           </div>
         ) : (
           <>
+            {/* ── Superposition Lesson Banner (Teal Accent) ───────────────────────── */}
+            {experimentMode === 'superposition' && superpositionChallenge && (
+              <div className="superposition-banner" role="region" aria-label="Superposition Module">
+                <span className="superposition-badge">Guided Module · Superposition</span>
+                <p className="superposition-lesson-text">{superpositionChallenge.lesson_text}</p>
+                <div className="superposition-prediction-prompt">
+                  💭 {superpositionChallenge.prediction_prompt}
+                </div>
+                <div className="superposition-target-row">
+                  <span className="superposition-target-pill">
+                    Target: <strong>|00⟩ ≈ 50%, |01⟩ ≈ 50%</strong> (tolerance ±5%)
+                  </span>
+                  <span>
+                    Adjust your prediction sliders, lock, then Run Circuit.
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* ── Debug Mode Banner (Amber Accent) ────────────────────────────────── */}
             {experimentMode === 'debug' && debugChallenge && (
               <div className="debug-banner" role="region" aria-label="Debug Challenge">
@@ -1414,6 +1522,14 @@ export default function App() {
             <div className="section-label">circuit mode · fixed bell state</div>
             <div className="palette-readonly-notice">
               Circuit is locked to <strong>Bell State [H(q0), CNOT(q0, q1)]</strong> for noise and decoherence analysis.
+            </div>
+          </section>
+        ) : experimentMode === 'superposition' ? (
+          <section aria-label="Gate palette">
+            <div className="section-label">circuit mode · superposition module</div>
+            <div className="palette-readonly-notice">
+              Circuit pre-loaded: <strong>H(q0)</strong> — Hadamard on qubit 0 creates a superposition.
+              Run it and compare against your prediction.
             </div>
           </section>
         ) : (
