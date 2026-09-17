@@ -587,3 +587,90 @@ Instructors require visibility into student learning patterns to intervene when 
   - Verified cohort aggregates: `total_students`, `most_missed_concept` is `entanglement`, and `students_needing_intervention` flags the student with their most recent misconception tag (`"Expects correlation without entangling gate"`).
 - **Frontend Verification**:
   - `npm --prefix frontend run build` completed with code 0 in 341ms without errors or warnings.
+
+---
+
+## [ADR-019] Superposition Guided Module & Generalized Dynamic Misconception Classifier
+- **Date:** 2026-09-16
+- **Model / Author:** Gemini 3.8 Flash / Antigravity
+- **Status:** Accepted
+
+#### Context & Motivation
+Following the Entanglement and Debug modules, a second core physics module was needed for Superposition to contrast genuine quantum state combination against classical ignorance. Concurrently, the AI misconception classifier had to be generalized from hardcoded entanglement tags to dynamic concept-scoped taxonomy queries in PostgreSQL.
+
+#### Decision & Mechanism
+1. **Database Migration (`20006ee23a47`)**:
+   - Seeded `superposition` misconception tags: `believes_qubit_is_secretly_definite_before_measurement`, `conflates_amplitude_with_probability`, `expects_same_outcome_every_run`.
+2. **Backend Endpoint (`GET /experiments/guided/superposition`)**:
+   - Returns pedagogical lesson text explaining Hadamard transformations, prediction prompt ("If you apply H to q0 and measure..."), target behavior `|00⟩: 0.5, |01⟩: 0.5`, and starter circuit.
+3. **Generalization of `classify_misconception()`**:
+   - Dynamically loads misconception tags for the active concept from PostgreSQL via `concept_id`.
+   - Populates LLM diagnostic prompt with concept-specific taxonomy and enforces exact tag matching.
+4. **Mastery Isolation**:
+   - Verified that successful completion credits `superposition` mastery (+0.1) while leaving `entanglement` isolated.
+
+---
+
+## [ADR-020] Single-Qubit Gates Guided Module & Multi-Taxonomy Pedagogical Architecture
+- **Date:** 2026-09-17
+- **Model / Author:** Gemini 3.8 Flash / Antigravity
+- **Status:** Accepted
+
+#### Context & Motivation
+Students transitioning from Superposition need exposure to fundamental single-qubit gates (X, Z) to understand deterministic bit-flips versus superposition creation, and to grasp relative phase versus computational basis measurement probabilities. Gate operations are unambiguous and low-risk to add using the proven guided module pattern.
+
+#### Decision & Mechanism
+1. **Database Migration (`3a1f9c7b8d2e`)**:
+   - Seeded `gates` scoped misconception tags in `misconception_tags`:
+     - `believes_x_creates_superposition`: "Confuses X (deterministic flip) with H (creates superposition)"
+     - `ignores_gate_order`: "Doesn't account for gate application order affecting the result"
+     - `expects_z_to_change_measurement_probability`: "Expects Z to change measurement outcomes on its own, not just phase"
+2. **Backend Endpoint (`GET /experiments/guided/gates`)**:
+   - Returns guided lesson explaining X bit-flip, Z phase flip, and non-commutative gate ordering.
+   - Target behavior: `{"00": 0.0, "01": 1.0, "10": 0.0, "11": 0.0}` with tolerance 0.05.
+   - Starter circuit: 2 qubits, empty gates `[]`.
+   - Extended `TAG_DESCRIPTIONS` in `classify_misconception` to describe each gates misconception for the diagnostic LLM.
+   - Added `req.experiment_type == "gates"` Socratic prompt handling in `/tutor/ask`.
+3. **Frontend Integration (`frontend/src/App.jsx` & `index.css`)**:
+   - Added `⚙️ Gates` button to header mode-toggle group.
+   - Reused lesson framing component with violet styling (`--superposition-violet: #6E5AD6`).
+   - Interactive canvas allows student to place X on q0; enforces prediction-first locking before running.
+   - `runCircuit` evaluates deterministic bit-flip on q0 (`p01 >= 0.92`), emits grounded observation, and credits `gates` mastery.
+4. **Verification & Testing (`test_gates.py`)**:
+   - Automated 4-stage test proves:
+     1. Raw JSON from `GET /experiments/guided/gates` matches specification.
+     2. Simulating X(q0) with correct locked prediction produces `01` at ~100% and matching comparison.
+     3. `GET /progress/me` shows `gates` mastery ticked (0.1, 1 attempt) while `superposition` and `entanglement` remain at 0.0.
+     4. Deliberately wrong prediction `{"00": 0.5, "01": 0.5}` returns `believes_x_creates_superposition` specifically from the classifier.
+
+---
+
+## [ADR-021] Multi-Tier Containerization, Production Healthchecks, and Cloud Deployment Readiness
+- **Date:** 2026-09-17
+- **Model / Author:** Gemini 3.8 Flash / Antigravity
+- **Status:** Accepted
+
+#### Context & Motivation
+The SIH Problem Statement and TRD (§11, §14) mandate cloud deployment readiness with full containerization, environment-config driven operations (zero hardcoded secrets or URLs), automated migrations, and separate scaling tiers for web, API/simulation, and database.
+
+#### Decision & Mechanism
+1. **Backend Containerization (`Dockerfile`)**:
+   - Base: `python:3.12-slim` with minimal build dependencies (`build-essential`, `libpq-dev`, `curl`).
+   - Security: Runs as non-root user `quanta` (UID 1000).
+   - Healthcheck: `HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 CMD curl -f http://localhost:8000/health || exit 1`.
+   - Entrypoint (`docker-entrypoint.sh`): Intelligently polls PostgreSQL socket connectivity before running `alembic upgrade head` and executing Uvicorn with 2 production workers.
+2. **Frontend Containerization (`frontend/Dockerfile` & `nginx.conf`)**:
+   - Multi-stage build: `node:20-alpine` builds static bundle via Vite; `nginx:1.25-alpine` serves the SPA.
+   - Nginx configuration: Gzip compression, standard security headers, SPA client routing (`try_files $uri $uri/ /index.html`), and reverse proxy for backend API endpoints.
+   - Dynamic API Base: `App.jsx` updated to read `import.meta.env.VITE_API_URL` with automatic fallback to `http://localhost:8000`.
+3. **Multi-Tier Orchestration (`docker-compose.yml`)**:
+   - Manages `postgres`, `backend`, and `frontend` with inter-service healthcheck dependencies (`condition: service_healthy`).
+   - Configurable environment via root `.env.example`.
+4. **Cloud Portability & CI/CD (`deploy/` & `.github/workflows/ci.yml`)**:
+   - Documented step-by-step production guides for GCP Cloud Run, AWS ECS Fargate, Railway/Render, and VPS deployments.
+   - Automated CI testing backend suites, frontend builds, and Docker container builds.
+
+#### Trade-offs & Consequences
+- **Positive:** True 100% turnkey deployment on any standard cloud or container engine; zero code modification needed between dev, test, and prod.
+- **Maintenance:** Docker and Nginx configs must be maintained alongside dependency updates.
+

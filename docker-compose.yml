@@ -1,16 +1,72 @@
 services:
+  # ---------------------------------------------------------------------------
+  # 1. Database Tier: PostgreSQL 15
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:15-alpine
     container_name: egreen_quanta_postgres
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: egreen_quanta
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${POSTGRES_DB:-egreen_quanta}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # 2. Backend API Tier: FastAPI + Qiskit Simulation Engine
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: egreen_quanta_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-egreen_quanta}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-egreen-quanta-jwt-secret-key-2026-prod}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3-flash-preview}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      HOST: 0.0.0.0
+      PORT: 8000
+      WORKERS: 2
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # 3. Frontend Web Tier: React 19 + Nginx SPA Server
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    container_name: egreen_quanta_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:80"
 
 volumes:
   postgres_data:

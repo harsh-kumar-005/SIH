@@ -24,7 +24,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 // ─── API Endpoints ────────────────────────────────────────────────────────────
-const BASE = 'http://localhost:8000';
+const BASE = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : 'http://localhost:8000';
 const API = {
   simulate:             `${BASE}/circuits/simulate`,
   predict:              `${BASE}/predictions`,
@@ -34,6 +34,7 @@ const API = {
   tutor:                `${BASE}/tutor/ask`,
   debugBellState:       `${BASE}/experiments/debug/bell-state`,
   guidedSuperposition:  `${BASE}/experiments/guided/superposition`,
+  guidedGates:          `${BASE}/experiments/guided/gates`,
   signup:               `${BASE}/auth/signup`,
   login:                `${BASE}/auth/login`,
   instructorDashboard:  `${BASE}/instructor/dashboard`,
@@ -96,6 +97,8 @@ export default function App() {
   const [debugHasRunOnce,         setDebugHasRunOnce]         = useState(false);
   // Superposition guided module data (lesson_text, prediction_prompt, target_behavior, starter_circuit)
   const [superpositionChallenge,  setSuperpositionChallenge]  = useState(null);
+  // Gates guided module data (lesson_text, prediction_prompt, target_behavior, starter_circuit)
+  const [gatesChallenge,          setGatesChallenge]          = useState(null);
 
   // ── Noise Lab ─────────────────────────────────────────────────────────────
   const [noiseLevel,         setNoiseLevel]         = useState(0.0);
@@ -364,6 +367,8 @@ export default function App() {
     ? 'Concept Mastery Progression'
     : experimentMode === 'superposition'
     ? 'Superposition Module · H Gate'
+    : experimentMode === 'gates'
+    ? 'Gates Module · Single-Qubit Gates'
     : runId
     ? `Circuit ${circuitId?.slice(0, 8)}… · run completed`
     : predLocked
@@ -510,6 +515,25 @@ export default function App() {
           );
         }
         if (predictionId) fetchCompare(predictionId);
+      } else if (experimentMode === 'gates') {
+        // Gates module: check deterministic bit flip on q0 (|01⟩ ≈ 100%)
+        const p01 = (counts['01'] || 0) / total;
+        const gatesOk = p01 >= 0.92;
+        if (gatesOk) {
+          addTutorMessage('grounded-observation',
+            `Run complete! |01⟩ at ${(p01 * 100).toFixed(0)}% — deterministic bit-flip on q0 confirmed.`
+          );
+          // Credit gates mastery
+          authFetch(API.progressEvent, {
+            method: 'POST',
+            body: JSON.stringify({ concept: 'gates', event_type: 'gates_verified', success: true }),
+          }).then(() => fetchProgress()).catch(() => {});
+        } else {
+          addTutorMessage('grounded-observation',
+            `Run complete. Expected |01⟩ ≈ 100% — observed |01⟩=${(p01 * 100).toFixed(0)}%. Try applying X to q0.`
+          );
+        }
+        if (predictionId) fetchCompare(predictionId);
       } else {
         // Standard mode observation
         const topState = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
@@ -549,9 +573,12 @@ export default function App() {
     setPredError(null);
 
     // Derive the active concept so compare_prediction credits the correct mastery ledger.
-    // 'superposition' mode tags predictions with concept:'superposition'; all other
-    // modes remain 'entanglement' (the only module with a real circuit so far).
-    const activeConcept = experimentMode === 'superposition' ? 'superposition' : 'entanglement';
+    // 'superposition' -> 'superposition', 'gates' -> 'gates'; all other modes remain 'entanglement'
+    const activeConcept = experimentMode === 'superposition'
+      ? 'superposition'
+      : experimentMode === 'gates'
+      ? 'gates'
+      : 'entanglement';
 
     try {
       // Step 1: Persist the circuit definition to DB so prediction has a valid circuit_id.
@@ -645,6 +672,41 @@ export default function App() {
       );
     } catch {
       setSimError('Network error — could not load superposition module.');
+    } finally {
+      setSimLoading(false);
+    }
+  }
+
+  // ─── Gates Guided Module Handler ──────────────────────────────────────────
+  async function enterGatesMode() {
+    setSimLoading(true);
+    setSimError(null);
+    try {
+      const res = await authFetch(API.guidedGates);
+      const data = await res.json();
+      if (!res.ok) {
+        setSimError('Failed to load gates module.');
+        return;
+      }
+      setExperimentMode('gates');
+      setGatesChallenge(data);
+      // Canvas is interactive: starter circuit has gates: []
+      setGates(data.starter_circuit?.gates || []);
+      setCnotControl(null);
+      setSimResult(null);
+      setCircuitId(null);
+      setRunId(null);
+      setPredLocked(false);
+      setPredictionId(null);
+      setCompareData(null);
+      setCurrentStep(0);
+      // Reset prediction distribution to 25% each so student must commit their own prediction
+      setPredDist({ '00': 0.25, '01': 0.25, '10': 0.25, '11': 0.25 });
+      addTutorMessage('grounded-observation',
+        `Gates module loaded. ${data.prediction_prompt} Place X on q0, lock your prediction, then run the circuit.`
+      );
+    } catch {
+      setSimError('Network error — could not load gates module.');
     } finally {
       setSimLoading(false);
     }
@@ -889,6 +951,7 @@ export default function App() {
           experiment_type: experimentMode === 'debug' ? 'debug'
             : experimentMode === 'noise' ? 'noise'
             : experimentMode === 'superposition' ? 'superposition'
+            : experimentMode === 'gates' ? 'gates'
             : undefined,
           noise_level: experimentMode === 'noise' ? noiseLevel : undefined,
           ideal_counts: experimentMode === 'noise' ? (idealSimResult?.measurement_counts || undefined) : undefined,
@@ -1129,6 +1192,14 @@ export default function App() {
             </button>
             <button
               type="button"
+              id="btn-gates-mode"
+              className={`mode-toggle-btn gates${experimentMode === 'gates' ? ' active' : ''}`}
+              onClick={enterGatesMode}
+            >
+              ⚙️ Gates
+            </button>
+            <button
+              type="button"
               id="btn-progress-mode"
               className={`mode-toggle-btn progress${experimentMode === 'progress' ? ' active' : ''}`}
               onClick={() => { setExperimentMode('progress'); fetchProgress(); }}
@@ -1158,6 +1229,8 @@ export default function App() {
               ? 'Concept Mastery Tracker'
               : experimentMode === 'superposition'
               ? 'Superposition Module · H Gate'
+              : experimentMode === 'gates'
+              ? 'Gates Module · Single-Qubit Gates'
               : experimentMode === 'noise'
               ? `Noise Lab · ${Math.round(noiseLevel * 100)}% Noise`
               : experimentMode === 'debug'
@@ -1463,6 +1536,15 @@ export default function App() {
                           Practice Module →
                         </button>
                       )}
+                      {c.name === 'gates' && (
+                        <button
+                          type="button"
+                          className="concept-action-btn gates"
+                          onClick={enterGatesMode}
+                        >
+                          Practice Module →
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1485,6 +1567,25 @@ export default function App() {
                   </span>
                   <span>
                     Adjust your prediction sliders, lock, then Run Circuit.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* ── Gates Lesson Banner (Violet Framing Accent) ────────────────────── */}
+            {experimentMode === 'gates' && gatesChallenge && (
+              <div className="gates-banner" role="region" aria-label="Gates Module">
+                <span className="gates-badge">Guided Module · Single-Qubit Gates</span>
+                <p className="gates-lesson-text">{gatesChallenge.lesson_text}</p>
+                <div className="gates-prediction-prompt">
+                  💭 {gatesChallenge.prediction_prompt}
+                </div>
+                <div className="gates-target-row">
+                  <span className="gates-target-pill">
+                    Target: <strong>|01⟩ ≈ 100%</strong> (tolerance ±5%)
+                  </span>
+                  <span>
+                    Place X on q0, adjust your prediction sliders, lock, then Run Circuit.
                   </span>
                 </div>
               </div>
@@ -1522,14 +1623,6 @@ export default function App() {
             <div className="section-label">circuit mode · fixed bell state</div>
             <div className="palette-readonly-notice">
               Circuit is locked to <strong>Bell State [H(q0), CNOT(q0, q1)]</strong> for noise and decoherence analysis.
-            </div>
-          </section>
-        ) : experimentMode === 'superposition' ? (
-          <section aria-label="Gate palette">
-            <div className="section-label">circuit mode · superposition module</div>
-            <div className="palette-readonly-notice">
-              Circuit pre-loaded: <strong>H(q0)</strong> — Hadamard on qubit 0 creates a superposition.
-              Run it and compare against your prediction.
             </div>
           </section>
         ) : (
@@ -1836,8 +1929,8 @@ export default function App() {
           )}
         </section>
 
-        {/* ── Prediction Panel (Standard mode only) ────────────────────────── */}
-        {experimentMode === 'standard' && (
+        {/* ── Prediction Panel (Standard, Superposition & Gates modes) ───────── */}
+        {(experimentMode === 'standard' || experimentMode === 'superposition' || experimentMode === 'gates') && (
           <section aria-label="Prediction panel">
             <div className="prediction-panel">
               <div className="section-label">
@@ -1946,8 +2039,8 @@ export default function App() {
                 id="btn-run-circuit"
                 className="btn-run"
                 onClick={runCircuit}
-                disabled={simLoading || (experimentMode === 'standard' && !predLocked) || gates.length === 0}
-                title={experimentMode === 'standard' && !predLocked ? 'Lock your prediction first — then Run Circuit' : undefined}
+                disabled={simLoading || ((experimentMode === 'standard' || experimentMode === 'gates') && !predLocked) || gates.length === 0}
+                title={(experimentMode === 'standard' || experimentMode === 'gates') && !predLocked ? 'Lock your prediction first — then Run Circuit' : undefined}
               >
                 {simLoading ? 'Simulating…' : 'Run Circuit'}
               </button>
@@ -1966,7 +2059,7 @@ export default function App() {
             {simLoading && (
               <span className="action-hint">Running on Aer simulator…</span>
             )}
-            {experimentMode === 'standard' && !predLocked && !simLoading && (
+            {(experimentMode === 'standard' || experimentMode === 'gates') && !predLocked && !simLoading && (
               <span className="action-hint">
                 {gates.length === 0
                   ? 'Place gates on the circuit, then lock your prediction to enable Run'

@@ -2212,3 +2212,87 @@ body {
   border-color: #0E7C6B;
 }
 
+/* ============================================================
+   GATES GUIDED MODULE STYLES
+   Accent: violet #6E5AD6
+   ============================================================ */
+
+.mode-toggle-btn.gates.active {
+  background: #F5F3FF;
+  border-color: #6E5AD6;
+  color: #6E5AD6;
+}
+
+.concept-action-btn.gates {
+  color: #6E5AD6;
+  border-color: rgba(110, 90, 214, 0.3);
+}
+
+.concept-action-btn.gates:hover {
+  background: #6E5AD6;
+  color: #FFFFFF;
+  border-color: #6E5AD6;
+}
+
+.gates-banner {
+  border-left: 3px solid #6E5AD6;
+  background: var(--surface);
+  border-top: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.gates-badge {
+  display: inline-block;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #5B21B6;
+  background: #EDE9FE;
+  border: 1px solid #C4B5FD;
+  padding: 2px 6px;
+  margin-bottom: 8px;
+}
+
+.gates-lesson-text {
+  font-family: var(--font-prose);
+  font-size: 14px;
+  color: var(--ink);
+  line-height: 1.65;
+  margin: 0 0 10px 0;
+}
+
+.gates-prediction-prompt {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  color: #6E5AD6;
+  border-top: 1px solid rgba(110, 90, 214, 0.15);
+  padding-top: 10px;
+  margin-top: 6px;
+}
+
+.gates-target-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--ink-secondary);
+}
+
+.gates-target-pill {
+  background: #F5F3FF;
+  border: 1px solid #C4B5FD;
+  color: #5B21B6;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: var(--font-data);
+  font-weight: 600;
+}
+

@@ -12,6 +12,7 @@ Endpoints:
   - GET  /predictions/{id}/compare   : Compares student prediction with actual simulation results
 """
 
+import asyncio
 import os
 import time
 import uuid
@@ -163,6 +164,7 @@ class PredictionCreateRequest(BaseModel):
     circuit_id: uuid.UUID
     predicted_distribution: Dict[str, float]
     user_id: Optional[uuid.UUID] = None
+    concept: Optional[str] = Field(None, description="Target concept, e.g. 'superposition' or 'entanglement'. Omit to skip mastery routing (backward-compat: compare falls back to 'entanglement' for old records with no _concept sentinel).")
 
 
 class PredictionResponse(BaseModel):
@@ -288,9 +290,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
+raw_cors = os.getenv("CORS_ORIGINS", "*")
+cors_origins = ["*"] if raw_cors.strip() == "*" else [orig.strip() for orig in raw_cors.split(",") if orig.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -872,11 +877,15 @@ async def create_prediction(
     )
     latest_run = (await db.execute(run_stmt)).scalar_one_or_none()
 
+    dist_to_store = dict(req.predicted_distribution)
+    if req.concept:
+        dist_to_store["_concept"] = req.concept
+
     prediction = Prediction(
         id=uuid.uuid4(),
         user_id=current_user.id,
         circuit_id=req.circuit_id,
-        predicted_distribution=req.predicted_distribution,
+        predicted_distribution=dist_to_store,
         actual_run_id=latest_run.id if latest_run else None,
     )
     db.add(prediction)
@@ -887,7 +896,7 @@ async def create_prediction(
         id=prediction.id,
         user_id=prediction.user_id,
         circuit_id=prediction.circuit_id,
-        predicted_distribution=prediction.predicted_distribution,
+        predicted_distribution={k: v for k, v in prediction.predicted_distribution.items() if not k.startswith("_")},
         actual_run_id=prediction.actual_run_id,
     )
 
@@ -945,18 +954,26 @@ async def compare_prediction(
         is_correct = False
     else:
         for state, pred_p in prediction.predicted_distribution.items():
+            if state.startswith("_"):
+                continue
             act_p = normalized_actual.get(state, 0.0)
             if abs(pred_p - act_p) > 0.08:
                 is_correct = False
                 break
 
-    # Update concept mastery for the student (Bell state is part of the entanglement module)
+    # Extract concept name stored as _concept sentinel in predicted_distribution JSONB.
+    # Falls back to 'entanglement' to preserve backward compatibility with older records.
+    concept_name = prediction.predicted_distribution.get("_concept", "entanglement")
+
+    # Update concept mastery for the student using the concept derived from this prediction.
     await update_concept_mastery(
         db=db,
         user_id=prediction.user_id,
-        concept_name="entanglement",
+        concept_name=concept_name,
         is_success=is_correct,
     )
+
+    print(f"[DEBUG compare_prediction] is_correct={is_correct}, concept_name={concept_name}", flush=True)
 
     # If prediction was incorrect, classify misconception via LLM asynchronously
     classified_tag = None
@@ -965,15 +982,15 @@ async def compare_prediction(
             classified_tag = await classify_misconception(
                 db=db,
                 user_id=prediction.user_id,
-                prediction_dist=prediction.predicted_distribution,
+                prediction_dist={k: v for k, v in prediction.predicted_distribution.items() if not k.startswith("_")},
                 actual_dist=normalized_actual,
-                concept_name="entanglement",
+                concept_name=concept_name,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[ERROR classify_misconception] {exc}", flush=True)
 
     return CompareResponse(
-        predicted=prediction.predicted_distribution,
+        predicted={k: v for k, v in prediction.predicted_distribution.items() if not k.startswith("_")},
         actual=normalized_actual,
         circuit_id=prediction.circuit_id,
         run_id=latest_run.id,
@@ -1040,10 +1057,82 @@ async def get_debug_bell_state() -> Dict[str, Any]:
     }
 
 
+@app.get(
+    "/experiments/guided/superposition",
+    status_code=status.HTTP_200_OK,
+    tags=["Experiments"],
+)
+async def get_guided_superposition() -> Dict[str, Any]:
+    """
+    Returns the guided Superposition module scaffold.
+
+    Pedagogical intent: distinguish quantum superposition from classical
+    ignorance. The H gate puts q0 into |+⟩ = (|0⟩+|1⟩)/√2. Measuring a
+    2-qubit register where only q0 has H applied gives |00⟩ and |01⟩ each
+    with 50% probability (Qiskit bit-ordering: rightmost bit = q0).
+    """
+    return {
+        "concept": "superposition",
+        "lesson_text": (
+            "A classical bit is always either 0 or 1. A qubit can be in a superposition of both "
+            "at once — not 'secretly one of the two and we just don't know which,' but genuinely "
+            "in a combined state until it's measured. The Hadamard (H) gate takes a qubit starting "
+            "at |0⟩ and puts it into an equal superposition of |0⟩ and |1⟩. When you measure it, "
+            "you get 0 or 1 each with 50% probability — but before measurement, it isn't correct "
+            "to say the qubit 'is' one or the other."
+        ),
+        "prediction_prompt": "If you apply H to q0 and measure, what distribution do you expect?",
+        "target_behavior": {
+            "distribution": {"00": 0.5, "01": 0.5, "10": 0.0, "11": 0.0},
+            "tolerance": 0.05,
+        },
+        "starter_circuit": {
+            "qubit_count": 2,
+            "gates": [],
+        },
+    }
+
+
+@app.get(
+    "/experiments/guided/gates",
+    status_code=status.HTTP_200_OK,
+    tags=["Experiments"],
+)
+async def get_guided_gates() -> Dict[str, Any]:
+    """
+    Returns the guided Gates module scaffold.
+
+    Pedagogical intent: introduce single-qubit gates (X, Z) and contrast
+    deterministic state transitions (X gate) with superposition (H gate).
+    X flips q0 from |0⟩ to |1⟩ deterministically: measuring a 2-qubit register
+    gives |01⟩ with 100% probability (Qiskit bit-ordering: rightmost bit = q0).
+    """
+    return {
+        "concept": "gates",
+        "lesson_text": (
+            "You've already used H (creates superposition) and CNOT (creates entanglement between two qubits). "
+            "There are other single-qubit gates worth knowing: X flips |0⟩ and |1⟩ (like a classical NOT). "
+            "Z leaves |0⟩ alone but flips the sign of |1⟩'s amplitude — this doesn't change measurement probabilities "
+            "on its own, but it matters once qubits interfere with each other. Try applying gates in different orders "
+            "and see how the final state changes — gate order matters in quantum circuits, just like it does with "
+            "matrix multiplication."
+        ),
+        "prediction_prompt": "If you apply X to q0 then measure, what do you expect?",
+        "target_behavior": {
+            "distribution": {"00": 0.0, "01": 1.0, "10": 0.0, "11": 0.0},
+            "tolerance": 0.05,
+        },
+        "starter_circuit": {
+            "qubit_count": 2,
+            "gates": [],
+        },
+    }
+
+
 # -----------------------------------------------------------------------------
 # 7. AI Tutor Endpoint
 # -----------------------------------------------------------------------------
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 
@@ -1181,6 +1270,63 @@ async def tutor_ask(
                 f"Observed distribution: {counts}. The circuit has NOT yet achieved the target."
             )
 
+    # Superposition Module System Prompt Adjustment
+    if req.experiment_type == "superposition":
+        counts = sim_run.counts or {}
+        total_shots = sum(counts.values()) or 1
+        p00 = counts.get("00", 0) / total_shots
+        p01 = counts.get("01", 0) / total_shots
+        # Target: equal 50/50 on |00⟩ and |01⟩ (H on q0 only, q1 stays |0⟩)
+        is_superposition_correct = (abs(p00 - 0.5) <= 0.08 and abs(p01 - 0.5) <= 0.08)
+
+        if is_superposition_correct:
+            system_prompt += (
+                "\n\nThis is a Superposition guided module. The student has correctly predicted or "
+                "observed an equal 50/50 distribution on |00⟩ and |01⟩ — the signature of a single "
+                "qubit in a Hadamard superposition. Confirm their understanding is correct. Emphasize "
+                "that this is NOT classical ignorance: the qubit was genuinely in both states until "
+                "measurement collapsed it. Optionally hint at the next concept: what happens if you "
+                "entangle two qubits in superposition (Bell state)."
+            )
+        else:
+            system_prompt += (
+                "\n\nThis is a Superposition guided module. The student's circuit or prediction does "
+                "not yet show the expected equal 50/50 split on |00⟩ and |01⟩. Ask a Socratic "
+                "diagnostic question about which gate creates superposition and what that means for "
+                "the measurement distribution. Do NOT directly tell them to use H — guide them to "
+                "realize it through a question about the qubit's state before measurement."
+            )
+        user_message += (
+            f"\n\nContext: Superposition module. Target is |00⟩ ≈ 50%, |01⟩ ≈ 50% (H on q0). "
+            f"Observed distribution: {counts}."
+        )
+
+    # Gates Module System Prompt Adjustment
+    if req.experiment_type == "gates":
+        counts = sim_run.counts or {}
+        total_shots = sum(counts.values()) or 1
+        p01 = counts.get("01", 0) / total_shots
+        # Target: deterministic 100% on |01⟩ (X on q0, q1 stays |0⟩)
+        is_gates_correct = p01 >= 0.92
+
+        if is_gates_correct:
+            system_prompt += (
+                "\n\nThis is a Gates guided module. The student has correctly observed or predicted "
+                "that the X gate deterministically flips q0 from |0⟩ to |1⟩, resulting in state |01⟩ ~ 100%. "
+                "Confirm their understanding is correct: emphasize that X is a deterministic bit-flip, "
+                "in contrast to H which creates a superposition."
+            )
+        else:
+            system_prompt += (
+                "\n\nThis is a Gates guided module. The student's circuit or prediction does not yet show "
+                "the deterministic bit-flip result (|01⟩ = 1.0). Ask a Socratic diagnostic question "
+                "about what the X gate does compared to H or classical NOT, without giving away the direct answer."
+            )
+        user_message += (
+            f"\n\nContext: Gates module. Target is |01⟩ = 1.0 (X on q0). "
+            f"Observed distribution: {counts}."
+        )
+
     # Noise Lab System Prompt Adjustment
     if req.experiment_type == "noise" or req.noise_level is not None:
         noise_pct = int(round((req.noise_level if req.noise_level is not None else (sim_run.noise_level or 0.0)) * 100))
@@ -1238,9 +1384,13 @@ async def tutor_ask(
 
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 429:
-            detail = "AI Tutor is momentarily busy (rate limit reached). Please wait a moment and try asking again."
-        else:
-            detail = f"AI Tutor service error ({e.response.status_code})."
+            # 429 → 503: transient quota exhaustion, not a permanent gateway failure.
+            # Clients / tests should treat 503 as "retry later" and skip-not-fail.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI Tutor is momentarily busy (rate limit reached). Please wait a moment and try asking again.",
+            )
+        detail = f"AI Tutor service error ({e.response.status_code})."
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=detail,
@@ -1306,6 +1456,7 @@ async def classify_misconception(
     actual_dist: Dict[str, float],
     concept_name: str = "entanglement",
 ) -> Optional[str]:
+    print(f"[DEBUG classify_misconception ENTRY] concept_name='{concept_name}'", flush=True)
     """
     Calls LLM (Gemini) when a student prediction diverges beyond tolerance.
     Constrains choice to the fixed taxonomy of misconception tags for the concept.
@@ -1314,37 +1465,73 @@ async def classify_misconception(
     """
     api_key = get_gemini_api_key()
     if not api_key:
+        print("[DEBUG classify_misconception] GEMINI_API_KEY is missing or empty!", flush=True)
         return None
 
     try:
         concept_stmt = select(Concept).where(func.lower(Concept.name) == concept_name.lower())
         concept = (await db.execute(concept_stmt)).scalar_one_or_none()
         if not concept:
+            print(f"[DEBUG classify_misconception] concept '{concept_name}' not found", flush=True)
             return None
 
         tags_stmt = select(MisconceptionTag).where(MisconceptionTag.concept_id == concept.id)
         tags = (await db.execute(tags_stmt)).scalars().all()
         if not tags:
+            print(f"[DEBUG classify_misconception] no tags for concept '{concept.name}'", flush=True)
             return None
 
+        TAG_DESCRIPTIONS: Dict[str, str] = {
+            "confuses_superposition_with_classical_probability": (
+                "The student treats quantum superposition as a deterministic classical outcome "
+                "(e.g. predicting 100% certainty on a single basis state like |00⟩=1.0) or misunderstands quantum probability as classical certainty."
+            ),
+            "expects_correlation_without_entangling_gate": (
+                "The student expects independent, uncorrelated uniform probabilities across all basis states "
+                "(e.g., |00⟩=0.25, |01⟩=0.25, |10⟩=0.25, |11⟩=0.25) as if qubits were in independent superpositions without entanglement."
+            ),
+            "misreads_zero_amplitude_as_impossible_outcome": (
+                "The student misinterprets destructive interference or zero amplitude as an intrinsically impossible measurement basis."
+            ),
+            "believes_qubit_is_secretly_definite_before_measurement": (
+                "The student believes the qubit was secretly in a definite 0 or 1 state all along prior to measurement "
+                "(e.g. predicting 100% certainty on a single basis state like |00⟩=1.0 when measuring a superposition)."
+            ),
+            "conflates_amplitude_with_probability": (
+                "The student treats the complex amplitude value directly as the measurement probability without squaring the magnitude."
+            ),
+            "expects_same_outcome_every_run": (
+                "The student expects a deterministic, identical outcome on every run "
+                "(e.g. predicting 100% certainty on a single basis state like |00⟩=1.0 when measuring a superposition)."
+            ),
+            "believes_x_creates_superposition": (
+                "The student confuses the Pauli-X gate with the Hadamard (H) gate, incorrectly predicting a superposition "
+                "(e.g. predicting a 50/50 split like |00⟩=0.5, |01⟩=0.5) when X acts deterministically as a bit flip."
+            ),
+            "ignores_gate_order": (
+                "The student does not account for gate application order affecting the resulting quantum state and measurement probabilities."
+            ),
+            "expects_z_to_change_measurement_probability": (
+                "The student expects the Pauli-Z gate to alter measurement outcome probabilities in the computational basis on its own, "
+                "confusing relative phase with measurement statistics."
+            ),
+        }
+
         tag_names = [t.name for t in tags]
-        tag_lines = "\n".join([f"- {t.name}: {t.display_label}" for t in tags])
+        tag_lines = "\n".join([f"- {t.name}: {TAG_DESCRIPTIONS.get(t.name, t.display_label)}" for t in tags])
 
         prompt = (
             f"You are an expert quantum education diagnostic system analyzing a student's misconception.\n\n"
-            f"Context: Student is exploring the concept '{concept.name}' (Bell state creation: H on q0, CNOT with control q0, target q1).\n"
-            f"Expected ideal Bell state distribution: {actual_dist}\n"
+            f"Context: Student is exploring the quantum concept '{concept.name}'.\n"
+            f"Expected ideal distribution: {actual_dist}\n"
             f"Student's predicted distribution: {prediction_dist}\n\n"
-            f"Available Misconception Taxonomy:\n"
+            f"Available Misconception Taxonomy for '{concept.name}':\n"
             f"{tag_lines}\n\n"
-            f"Taxonomy Semantic Definitions:\n"
-            f"- confuses_superposition_with_classical_probability: The student treats quantum superposition as a deterministic classical outcome (e.g. predicting 100% certainty on a single basis state like |00⟩) or misunderstands quantum probability as classical certainty.\n"
-            f"- expects_correlation_without_entangling_gate: The student expects independent, uncorrelated uniform probabilities across all basis states (e.g., |00⟩=0.25, |01⟩=0.25, |10⟩=0.25, |11⟩=0.25) as if qubits were in independent superpositions without entanglement.\n"
-            f"- misreads_zero_amplitude_as_impossible_outcome: The student misinterprets destructive interference or zero amplitude as an intrinsically impossible measurement basis.\n\n"
             f"CRITICAL RULES:\n"
-            f"1. If the student's prediction clearly matches one of the misconceptions above, return ONLY that exact tag name.\n"
-            f"2. If NONE of the 3 tags fit (for example, if the student predicted an anti-correlated entangled state |01⟩ and |10⟩, which is an inverted phase/correlation error rather than any of the 3 tags above), you MUST respond with 'none'.\n"
-            f"3. Do NOT force-fit a tag if none fits. Respond ONLY with the single tag identifier ({', '.join(tag_names)}) or 'none'. No markdown, no punctuation, no other words."
+            f"1. Compare the student's predicted distribution {prediction_dist} with the expected ideal distribution {actual_dist}.\n"
+            f"2. If the student's prediction clearly matches one of the misconceptions above, return ONLY that exact tag name.\n"
+            f"3. If NONE of the available tags fit (e.g. if the student predicted an anti-correlated state |01⟩ and |10⟩ when expecting |00⟩ and |11⟩, which is an unlisted phase/correlation error), you MUST respond with 'none'.\n"
+            f"4. Do NOT force-fit a tag if none fits. Respond ONLY with a single tag identifier ({', '.join(tag_names)}) or 'none'. No markdown, no punctuation, no extra words."
         )
 
         payload = {
@@ -1355,15 +1542,28 @@ async def classify_misconception(
             },
         }
 
-        async with httpx.AsyncClient(timeout=12.0) as client:
-            resp = await client.post(
-                GEMINI_URL,
-                params={"key": api_key},
-                json=payload,
-            )
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
+        data = None
+        for attempt in range(4):
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    GEMINI_URL,
+                    params={"key": api_key},
+                    json=payload,
+                )
+                print(f"[DEBUG classify_misconception] attempt {attempt+1} status={resp.status_code}", flush=True)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    break
+                elif resp.status_code in (429, 503):
+                    wait_time = 3.0 * (attempt + 1)
+                    print(f"[DEBUG classify_misconception] rate limit hit (status {resp.status_code}), waiting {wait_time}s...", flush=True)
+                    await asyncio.sleep(wait_time)
+                else:
+                    print(f"[DEBUG classify_misconception] Gemini error body: {resp.text}", flush=True)
+                    return None
+
+        if not data:
+            return None
 
         candidates = data.get("candidates", [])
         if not candidates:
@@ -1371,6 +1571,7 @@ async def classify_misconception(
         parts = candidates[0].get("content", {}).get("parts", [])
         raw_text = parts[0].get("text", "").strip().lower() if parts else ""
         cleaned = raw_text.replace("`", "").replace('"', "").replace("'", "").strip()
+        print(f"[DEBUG classify_misconception] raw_text='{raw_text}', cleaned='{cleaned}'", flush=True)
 
         if cleaned == "none" or "none" in cleaned:
             return None
@@ -1496,5 +1697,12 @@ async def get_my_progress(
         overall_mastered=overall_mastered,
         total_concepts=len(concepts),
     )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
 
 

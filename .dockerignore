@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+env/
+venv/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+node_modules/
+dist/
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation scratchpad & local logs
+*.log
+.gemini/
+scratch/
