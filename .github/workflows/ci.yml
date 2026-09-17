@@ -60,6 +60,7 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/egreen_quanta
           JWT_SECRET_KEY: ci-test-secret-key-2026
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python tests/test_api.py
           python tests/test_auth.py
