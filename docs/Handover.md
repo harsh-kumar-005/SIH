@@ -113,3 +113,28 @@
 2. Collapsible pedagogy sidebar rail.
 3. Drag-to-set prediction sliders.
 
+
+---
+
+## Session Note — 2026-09-18 (Root Folder Restructure)
+
+**What changed:**
+- All documentation markdown files moved from root → `docs/`
+  - `Architecture.md`, `Constraints.md`, `Decisions.md`, `Flow.md`, `Handover.md`
+  - `SIH_Quantum_Platform_Backend_Schema.md`, `SIH_Quantum_Platform_PRD.md`
+  - `SIH_Quantum_Platform_TRD.md`, `SIH_Quantum_Platform_UIUX.md`
+- All test & simulation scripts moved from root → `tests/`
+  - `test_api.py`, `test_auth.py`, `test_debug_tutor.py`, `test_gates.py`
+  - `test_instructor_dashboard.py`, `test_noise_lab.py`, `test_predictions_workflow.py`
+  - `test_progress.py`, `test_superposition.py`, `simulate_bell.py`
+  - `tests/conftest.py` added — patches `sys.path` so `from main import app` still resolves.
+- `AGENTS.md` kept at root (agent-rule convention).
+- `tutor_prompt.py`, `main.py`, `requirements.txt`, Docker files, `alembic.ini` kept at root.
+
+**How to run tests now:**
+```bash
+# From project root:
+pytest tests/
+# Or a specific file:
+pytest tests/test_api.py
+```
