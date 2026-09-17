@@ -61,10 +61,10 @@ jobs:
           JWT_SECRET_KEY: ci-test-secret-key-2026
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python test_api.py
-          python test_auth.py
-          python test_progress.py
-          python test_instructor_dashboard.py
+          python tests/test_api.py
+          python tests/test_auth.py
+          python tests/test_progress.py
+          python tests/test_instructor_dashboard.py
 
   frontend-build:
     name: Frontend Lint & Build

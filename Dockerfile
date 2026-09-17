@@ -27,7 +27,7 @@ RUN pip install --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy application code, database configurations, and migrations
-COPY main.py tutor_prompt.py simulate_bell.py alembic.ini ./
+COPY main.py tutor_prompt.py alembic.ini ./
 COPY alembic/ ./alembic/
 COPY db/ ./db/
 COPY docker-entrypoint.sh ./
