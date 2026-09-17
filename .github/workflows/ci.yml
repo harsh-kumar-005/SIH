@@ -50,6 +50,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/egreen_quanta
           JWT_SECRET_KEY: ci-test-secret-key-2026
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python main.py &
           sleep 3
@@ -58,6 +59,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/egreen_quanta
           JWT_SECRET_KEY: ci-test-secret-key-2026
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python test_api.py
           python test_auth.py
