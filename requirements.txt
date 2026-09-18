@@ -10,3 +10,7 @@ alembic>=1.13.0
 passlib==1.7.4
 bcrypt==3.2.2
 python-jose[cryptography]>=3.3.0
+# Google OAuth 2.0 server-side id_token verification
+google-auth>=2.29.0
+requests>=2.31.0
+python-dotenv>=1.0.0

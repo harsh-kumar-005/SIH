@@ -14,17 +14,21 @@ Endpoints:
 
 import asyncio
 import os
+import secrets
 import time
+import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 import httpx
 import numpy as np
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from qiskit import QuantumCircuit
@@ -140,6 +144,8 @@ class UserResponse(BaseModel):
     email: str
     role: str
     display_name: str
+    profile_picture: Optional[str] = None
+    auth_provider: str = "email"
 
 
 class SignupRequest(BaseModel):
@@ -311,6 +317,32 @@ ACCESS_TOKEN_EXPIRE_HOURS = 24
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security_bearer = HTTPBearer(auto_error=False)
 
+# -----------------------------------------------------------------------------
+# 4.6. Google OAuth 2.0 Configuration
+# -----------------------------------------------------------------------------
+# Credentials MUST be set as environment variables — never hardcoded.
+GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+# Default redirect URI for local Docker Compose development.
+# Override with GOOGLE_REDIRECT_URI env var in production.
+GOOGLE_REDIRECT_URI  = os.getenv(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8000/auth/google/callback"
+)
+# After callback, redirect browser to this frontend URL with token in fragment
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# Google OAuth 2.0 endpoint URLs (stable, from discovery document)
+GOOGLE_AUTH_URL  = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+# In-memory CSRF state store: {state_token: expires_at_unix_float}
+# Each state token is a 32-byte cryptographically-random hex string.
+# It expires after 10 minutes — the OAuth flow must complete within that window.
+# In a multi-process production deployment, replace this with Redis.
+_oauth_state_store: Dict[str, float] = {}
+OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
+
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -389,6 +421,198 @@ async def require_instructor(user: User = Depends(get_current_user)) -> User:
         )
     return user
 
+
+# -----------------------------------------------------------------------------
+# 4.7. Google OAuth Helper Functions
+# -----------------------------------------------------------------------------
+def _make_user_response(user: User) -> "UserResponse":
+    """Builds a UserResponse from a User ORM object, including optional Google fields."""
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        display_name=user.display_name,
+        profile_picture=user.profile_picture,
+        auth_provider=user.auth_provider or "email",
+    )
+
+
+def _generate_oauth_state() -> str:
+    """Generates a cryptographically secure CSRF state token and stores it with TTL."""
+    state = secrets.token_hex(32)
+    # Purge expired states to prevent unbounded memory growth
+    now = time.time()
+    expired = [k for k, exp in _oauth_state_store.items() if exp < now]
+    for k in expired:
+        del _oauth_state_store[k]
+    _oauth_state_store[state] = now + OAUTH_STATE_TTL_SECONDS
+    return state
+
+
+def _validate_oauth_state(state: str) -> bool:
+    """
+    Validates and consumes a CSRF state token.
+    Returns True if valid and not expired, False otherwise.
+    One-time use: valid state is deleted from the store on first check.
+    """
+    expires_at = _oauth_state_store.pop(state, None)
+    if expires_at is None:
+        return False  # Unknown state — possible CSRF or replay
+    if time.time() > expires_at:
+        return False  # Expired state
+    return True
+
+
+async def _exchange_code_for_tokens(code: str) -> Dict[str, Any]:
+    """
+    Exchanges the authorization code from Google for access_token + id_token.
+    All secrets remain server-side; the frontend never sees them.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "code":          code,
+                "client_id":     GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri":  GOOGLE_REDIRECT_URI,
+                "grant_type":    "authorization_code",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to exchange code with Google token endpoint",
+        )
+    return resp.json()
+
+
+def _verify_google_id_token(id_token_str: str) -> Dict[str, Any]:
+    """
+    Verifies a Google id_token using google-auth's transport-agnostic verifier.
+    Checks: signature (against Google's JWKS), audience (client_id), expiry, issuer.
+    Returns the verified claims dict on success; raises HTTPException on failure.
+    """
+    from google.oauth2 import id_token as google_id_token
+    from google.auth.transport import requests as google_requests
+
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            id_token_str,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID,
+        )
+    except ValueError as exc:
+        # google-auth raises ValueError for invalid/expired tokens
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Google id_token verification failed: {exc}",
+        )
+    # Double-check issuer (google-auth validates this, but belt-and-suspenders)
+    if claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google id_token has unexpected issuer",
+        )
+    return claims
+
+
+async def _upsert_google_user(db: AsyncSession, claims: Dict[str, Any]) -> User:
+    """
+    Atomic find-or-create for a Google-authenticated user.
+
+    Strategy (in order):
+      1. Look up by google_id — existing Google user, log them in.
+      2. Look up by email — existing email/password user, link Google to their account.
+      3. Create new user — first-time Google login.
+
+    Race-condition safety: If two simultaneous requests for the same new Google
+    account both reach step 3, the second INSERT will hit the UNIQUE constraint
+    on google_id (or email) and raise IntegrityError. We catch that and re-fetch
+    the row created by the first request — so only ONE account is ever created.
+    """
+    google_id   = claims["sub"]          # Google's stable, unique subject identifier
+    email       = claims["email"].strip().lower()
+    name        = claims.get("name", email.split("@")[0])
+    picture_url = claims.get("picture")  # Profile photo URL
+
+    # ── Step 1: Look up by google_id ──────────────────────────────────────────
+    stmt = select(User).where(User.google_id == google_id)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if user:
+        # Refresh profile picture in case Google updated it
+        if picture_url and user.profile_picture != picture_url:
+            user.profile_picture = picture_url
+            await db.commit()
+            await db.refresh(user)
+        return user
+
+    # ── Step 2: Look up by email — link existing account ─────────────────────
+    stmt = select(User).where(User.email == email)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if user:
+        # Link Google identity to the existing email/password account.
+        # This is safe because Google has verified the email is theirs.
+        if user.google_id and user.google_id != google_id:
+            # Edge case: this account is linked to a DIFFERENT Google account.
+            # Treat as error — do not silently take over another Google account.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This email is linked to a different Google account",
+            )
+        user.google_id      = google_id
+        user.profile_picture = picture_url
+        user.auth_provider  = "google"  # Now primarily a Google account
+        try:
+            await db.commit()
+            await db.refresh(user)
+        except IntegrityError:
+            await db.rollback()
+            # Another request linked this google_id concurrently — fetch result
+            stmt = select(User).where(User.google_id == google_id)
+            user = (await db.execute(stmt)).scalar_one_or_none()
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Account link conflict — please try again",
+                )
+        return user
+
+    # ── Step 3: Create new user ───────────────────────────────────────────────
+    new_user = User(
+        id=uuid.uuid4(),
+        email=email,
+        password_hash=None,    # Google-only: no local password
+        google_id=google_id,
+        profile_picture=picture_url,
+        role="student",         # Default role for new Google signups
+        display_name=name,
+        auth_provider="google",
+    )
+    db.add(new_user)
+    try:
+        await db.commit()
+        await db.refresh(new_user)
+        return new_user
+    except IntegrityError:
+        # Race condition: another concurrent request just created this user.
+        # Roll back and fetch the winner's row — still one account total.
+        await db.rollback()
+        stmt = select(User).where(User.google_id == google_id)
+        user = (await db.execute(stmt)).scalar_one_or_none()
+        if not user:
+            stmt = select(User).where(User.email == email)
+            user = (await db.execute(stmt)).scalar_one_or_none()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="User creation conflict — please try again",
+            )
+        return user
+
+
 simulator = AerSimulator()
 
 
@@ -412,6 +636,13 @@ async def auth_signup(req: SignupRequest, db: AsyncSession = Depends(get_db)) ->
     stmt = select(User).where(User.email == email_clean)
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing:
+        # Give a specific message when the account was created via Google:
+        # the user should click "Continue with Google" instead.
+        if existing.auth_provider == "google" and not existing.password_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This email is registered via Google. Please use 'Continue with Google' to log in.",
+            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A user with this email already exists",
@@ -423,17 +654,13 @@ async def auth_signup(req: SignupRequest, db: AsyncSession = Depends(get_db)) ->
         password_hash=hash_password(req.password),
         role=req.role,
         display_name=req.display_name.strip(),
+        auth_provider="email",
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
-    return UserResponse(
-        id=user.id,
-        email=user.email,
-        role=user.role,
-        display_name=user.display_name,
-    )
+    return _make_user_response(user)
 
 
 @app.post(
@@ -456,6 +683,15 @@ async def auth_login(req: LoginRequest, db: AsyncSession = Depends(get_db)) -> T
     if not user:
         raise generic_401
 
+    # Guard: Google-only accounts have no password hash.
+    # Return a clear message so the user knows to use Google login.
+    if not user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account was created with Google. Please use 'Continue with Google' to log in.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     if not verify_password(req.password, user.password_hash):
         raise generic_401
 
@@ -463,13 +699,138 @@ async def auth_login(req: LoginRequest, db: AsyncSession = Depends(get_db)) -> T
     return TokenResponse(
         access_token=token,
         token_type="bearer",
-        user=UserResponse(
-            id=user.id,
-            email=user.email,
-            role=user.role,
-            display_name=user.display_name,
-        ),
+        user=_make_user_response(user),
     )
+
+
+# -----------------------------------------------------------------------------
+# Google OAuth 2.0 Endpoints
+# -----------------------------------------------------------------------------
+@app.get(
+    "/auth/google",
+    tags=["Authentication"],
+    summary="Initiate Google OAuth 2.0 login flow",
+    description="Redirects the browser to Google's consent screen. "
+                "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured.",
+)
+async def auth_google_initiate() -> RedirectResponse:
+    """
+    Step 1 of Google OAuth: generate CSRF state token and redirect to Google.
+    The frontend simply navigates `window.location.href` to this endpoint.
+    """
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Google OAuth is not configured on this server. "
+                "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables."
+            ),
+        )
+
+    state = _generate_oauth_state()
+
+    params = {
+        "client_id":     GOOGLE_CLIENT_ID,
+        "redirect_uri":  GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        # openid  — required for id_token (verified identity)
+        # email   — we need the email address
+        # profile — display name and profile picture
+        "scope":         "openid email profile",
+        "state":         state,
+        # online access_type — we don't need refresh tokens
+        "access_type":   "online",
+    }
+    google_url = GOOGLE_AUTH_URL + "?" + urllib.parse.urlencode(params)
+    return RedirectResponse(url=google_url, status_code=302)
+
+
+@app.get(
+    "/auth/google/callback",
+    tags=["Authentication"],
+    summary="Google OAuth 2.0 callback — validates code, upserts user, issues JWT",
+)
+async def auth_google_callback(
+    code:  Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """
+    Step 2 of Google OAuth: Google redirects here with ?code=...&state=... after consent.
+
+    Security validations (in order):
+      1. User did not cancel (no ?error=access_denied from Google)
+      2. state matches a known, non-expired CSRF token (prevents CSRF attacks)
+      3. id_token is cryptographically verified against Google's JWKS
+
+    On success: issues JWT, redirects browser to FRONTEND_URL/#token=<jwt>
+    On failure: redirects browser to FRONTEND_URL/#error=<code>
+    Fragment (#...) is never sent to the server — it's client-side only.
+    """
+    # ── Google reported an error (e.g., user cancelled consent) ───────────────
+    if error:
+        error_code = "google_cancelled" if error == "access_denied" else "google_error"
+        return RedirectResponse(url=f"{FRONTEND_URL}/#error={error_code}", status_code=302)
+
+    # ── Missing required parameters ────────────────────────────────────────────
+    if not code or not state:
+        return RedirectResponse(url=f"{FRONTEND_URL}/#error=token_invalid", status_code=302)
+
+    # ── CSRF state validation — one-time use, TTL-checked ─────────────────────
+    if not _validate_oauth_state(state):
+        return RedirectResponse(url=f"{FRONTEND_URL}/#error=token_invalid", status_code=302)
+
+    # ── Exchange authorization code for tokens ─────────────────────────────────
+    try:
+        token_data = await _exchange_code_for_tokens(code)
+    except HTTPException:
+        return RedirectResponse(url=f"{FRONTEND_URL}/#error=google_error", status_code=302)
+
+    id_token_str = token_data.get("id_token")
+    if not id_token_str:
+        return RedirectResponse(url=f"{FRONTEND_URL}/#error=google_error", status_code=302)
+
+    # ── Cryptographically verify the id_token ─────────────────────────────────
+    # This is the authoritative proof of identity — we NEVER trust frontend claims.
+    try:
+        claims = _verify_google_id_token(id_token_str)
+    except HTTPException:
+        return RedirectResponse(url=f"{FRONTEND_URL}/#error=token_invalid", status_code=302)
+
+    # ── Google must have verified the email ────────────────────────────────────
+    if not claims.get("email_verified"):
+        return RedirectResponse(url=f"{FRONTEND_URL}/#error=google_error", status_code=302)
+
+    # ── Upsert user (find-or-create, race-safe) ────────────────────────────────
+    try:
+        user = await _upsert_google_user(db, claims)
+    except HTTPException as exc:
+        error_code = "email_conflict" if exc.status_code == 409 else "google_error"
+        return RedirectResponse(url=f"{FRONTEND_URL}/#error={error_code}", status_code=302)
+
+    # ── Issue JWT (identical format to email/password login) ───────────────────
+    jwt_token = create_access_token(user.id, user.role)
+
+    # ── Redirect frontend with token in URL fragment ───────────────────────────
+    # Fragment (#...) is never sent to the server — the frontend reads it, stores
+    # it in React state (in-memory only), then immediately clears it from the URL.
+    return RedirectResponse(url=f"{FRONTEND_URL}/#token={jwt_token}", status_code=302)
+
+
+@app.get(
+    "/auth/me",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Authentication"],
+    summary="Return current authenticated user info from JWT",
+)
+async def auth_me(current_user: User = Depends(get_current_user)) -> UserResponse:
+    """
+    Returns the currently authenticated user's profile.
+    Useful for the frontend to display user info without a full re-login.
+    """
+    return _make_user_response(current_user)
 
 
 @app.get(

@@ -674,3 +674,36 @@ The SIH Problem Statement and TRD (§11, §14) mandate cloud deployment readines
 - **Positive:** True 100% turnkey deployment on any standard cloud or container engine; zero code modification needed between dev, test, and prod.
 - **Maintenance:** Docker and Nginx configs must be maintained alongside dependency updates.
 
+
+---
+
+## ADR-012: Google OAuth 2.0 — Server-Side Authorization Code Flow
+**Date:** 2026-09-19 | **Author:** Antigravity (Google DeepMind) | **Status:** Accepted
+
+### Context
+User requested Google/Gmail authentication that: maps one Google account → one app account (no duplicates), persists auth across sessions (handled by existing in-memory JWT), protects routes, handles errors gracefully, and preserves the existing email/password auth.
+
+### Decision: Server-Side Authorization Code Flow (Not Implicit / Not PKCE-from-frontend)
+
+**Chosen approach:** Backend handles the entire OAuth exchange. Frontend navigates `window.location.href` to `/auth/google` (backend). Backend redirects to Google, receives code at `/auth/google/callback`, exchanges for tokens server-side, verifies `id_token` cryptographically via `google-auth` + Google JWKS, upserts user, issues our own JWT, redirects browser to `FRONTEND_URL/#token=<jwt>`. Frontend reads fragment, stores JWT in React state (in-memory), clears fragment from URL.
+
+### Alternatives Rejected
+
+| Alternative | Why Rejected |
+|---|---|
+| **Frontend PKCE** (Google JS SDK) | Frontend would receive Google access tokens directly. More attack surface. Our JWT is then issued based on frontend-asserted claims — requires careful validation. Adds client-side Google SDK dependency. |
+| **Implicit Flow** | Deprecated by Google. Tokens sent in URL fragment permanently. No id_token expiry or signature check in JS. |
+| **Passport.js / next-auth** | Not applicable — this is a raw FastAPI + React project, not Node. |
+| **Store JWT in localStorage** | Rejected to preserve existing design constraint (XSS risk). Fragment is immediately cleared. |
+
+### Key Implementation Details
+- **CSRF protection:** `secrets.token_hex(32)` state token stored with 10-minute TTL. One-time use (deleted on validation).
+- **Duplicate prevention:** UNIQUE DB constraint on `google_id` + `email`. `_upsert_google_user()` uses 3-step strategy: find by google_id → find by email (link existing account) → create new. IntegrityError on race conditions handled by re-fetching.
+- **Google-only accounts:** `password_hash = NULL`. `auth_login` guards against password-login attempts by Google-only users with a clear error message.
+- **Email linking:** If a user has an email/password account with the same email as their Google account, we link Google to the existing account (not create a duplicate).
+- **Token issuance:** Same `create_access_token()` function used for both email/password and Google OAuth — zero changes to JWT format or downstream consumers.
+
+### Trade-offs & Consequences
+- **Positive:** All Google credentials remain server-side. Frontend never sees Google tokens. In-memory state store is simple and correct for single-process Docker Compose.
+- **Constraint:** In-memory `_oauth_state_store` is per-process. Multi-process production deployments require Redis.
+- **New Google users default to `student` role.** No mechanism to assign `instructor` via Google signup — same limitation as before.

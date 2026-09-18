@@ -1,10 +1,63 @@
 # Session Handover & State (`Handover.md`)
 
-**Current Date & Time:** 2026-09-16 23:11 IST
-**Active Model:** Antigravity (Google DeepMind)
-**Status:** FastAPI backend server started and active on `http://localhost:8000` via `.venv/bin/python main.py`. `__main__` entrypoint added to `main.py` with uvicorn reloader. Sentinel key filtering fixed in `compare_prediction`. Full automated test suite (6/6 API, auth, progress, instructor dashboard, noise lab) passing.
+---
+
+## Session: 2026-09-19 00:11 IST — Google OAuth 2.0 Implementation
+**Model:** Antigravity (Google DeepMind) | **Status:** ✅ COMPLETE — pending user credential configuration
+
+### What Was Accomplished
+Complete, production-ready Google OAuth 2.0 (server-side Authorization Code Flow) implemented and verified running in Docker Compose.
+
+**Files Changed:**
+| File | Change |
+|---|---|
+| [`requirements.txt`](file:///Users/dayalgupta/Desktop/SIH/requirements.txt) | Added `google-auth>=2.29.0`, `requests>=2.31.0`, `python-dotenv>=1.0.0` |
+| [`db/models.py`](file:///Users/dayalgupta/Desktop/SIH/db/models.py) | Added `google_id`, `profile_picture`, `auth_provider`, `updated_at` to `User`; `password_hash` made nullable |
+| [`alembic/versions/a8f2c3d1e9b4_add_google_oauth_fields.py`](file:///Users/dayalgupta/Desktop/SIH/alembic/versions/a8f2c3d1e9b4_add_google_oauth_fields.py) | New migration — applied, at `head` |
+| [`main.py`](file:///Users/dayalgupta/Desktop/SIH/main.py) | Added `GET /auth/google`, `GET /auth/google/callback`, `GET /auth/me`; added `_upsert_google_user()`, `_verify_google_id_token()`, `_exchange_code_for_tokens()`, `_generate_oauth_state()`, `_validate_oauth_state()`; updated `auth_signup` and `auth_login` to handle Google-only accounts gracefully |
+| [`frontend/src/App.jsx`](file:///Users/dayalgupta/Desktop/SIH/frontend/src/App.jsx) | Added `googleAuth` + `me` API constants; OAuth fragment handler `useEffect`; `handleGoogleLogin()`; Google button + divider in auth screen |
+| [`frontend/src/index.css`](file:///Users/dayalgupta/Desktop/SIH/frontend/src/index.css) | Added `.auth-google-btn`, `.auth-google-icon`, `.auth-divider` styles |
+| [`.env.example`](file:///Users/dayalgupta/Desktop/SIH/.env.example) | Added `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `FRONTEND_URL` |
+
+### Current State of Running System
+- **Containers:** `egreen_quanta_postgres` + `egreen_quanta_backend` running, healthy
+- **Migration:** `a8f2c3d1e9b4` applied, schema verified
+- **Test Results:** `test_auth.py` 8/8 ✅ | `test_progress.py` 5/5 ✅ | `test_instructor_dashboard.py` ❌ pre-existing AI classifier failure (requires `GEMINI_API_KEY`)
+- **Endpoints:**
+  - `GET /health` → `{"status": "ok"}` ✅
+  - `GET /auth/google` → 503 "not configured" (correct — no credentials set) ✅
+  - `GET /auth/me` → 401 unauthorized (correct — no token) ✅
+  - `POST /auth/login` → works with existing email/password accounts ✅
+  - `POST /auth/signup` → works with email/password, gives clear error if Google account exists ✅
+
+### What the User Must Do Next (One-Time Setup)
+1. Go to [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Credentials
+2. Create OAuth 2.0 Client ID (Web application type)
+3. Add authorized redirect URI: `http://localhost:8000/auth/google/callback`
+4. Copy Client ID and Client Secret into `.env`:
+   ```
+   GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=....
+   ```
+5. `docker compose restart backend` to load the new env vars
+6. Click "Continue with Google" in the login screen to test E2E
+
+### Uncommitted Changes
+The following files have local changes not yet committed to git (per user's explicit instruction "don't push into github yet"):
+- `requirements.txt`, `db/models.py`, `main.py`, `.env.example`
+- `alembic/versions/a8f2c3d1e9b4_add_google_oauth_fields.py`
+- `frontend/src/App.jsx`, `frontend/src/index.css`
+- `.env` (newly created from `.env.example` — gitignored)
+
+### Known Issues / Edge Cases
+- **Multi-process deployment**: In-memory `_oauth_state_store` in `main.py` is per-process. Replace with Redis if running multiple uvicorn workers.
+- **Instructor role via Google**: New Google signups default to `student`. No UI exists to change role to `instructor` post-signup (same as before — was a pre-existing constraint).
+- **Session persistence**: Google OAuth auth is in-memory like email/password. Page refresh requires re-login. This is the existing design decision.
 
 ---
+
+**Previous Session:**
+**Current Date & Time:** 2026-09-16 23:11 IST
 
 ## 1. Current State & What Was Accomplished
 - **Backend Entrypoint & Execution Fix**: Added `if __name__ == "__main__": uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)` to [main.py](file:///Users/sohambanerjee/Desktop/Egreen-Quanta/main.py). Added sentinel key (`_concept`) skipping during probability tolerance calculations and `CompareResponse` filtering.

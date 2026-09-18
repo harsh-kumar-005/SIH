@@ -31,7 +31,9 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, nullable=False, index=True)
-    password_hash = Column(Text, nullable=False)
+    # password_hash is nullable: Google-only users authenticate via OAuth,
+    # so they never have a local password. Email/password users always have one.
+    password_hash = Column(Text, nullable=True)
     role = Column(
         Text,
         CheckConstraint("role IN ('student', 'instructor')", name="check_user_role"),
@@ -39,7 +41,13 @@ class User(Base):
         default="student"
     )
     display_name = Column(String(255), nullable=False)
+    # Google OAuth fields — null for email/password users
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
+    profile_picture = Column(Text, nullable=True)
+    # auth_provider: 'email' | 'google' — determines allowed login methods
+    auth_provider = Column(String(20), nullable=False, default="email")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     circuits = relationship("Circuit", back_populates="owner")
